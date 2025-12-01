@@ -44,8 +44,8 @@ TEMPLATE = r"""
     .dir { font-weight: 600; }
     .audio { display: block; margin-top: .3rem; width: 100%; max-width: 520px; }
     .wrap { word-break: break-all; }
-    .controls { display:flex; gap:.5rem; align-items:center; margin:.25rem 0 1rem 0;}
-    input[type="search"]{ padding:.4rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; width: min(480px, 95%);}
+    .controls { display:flex; gap:.75rem; align-items:center; margin:.25rem 0 1rem 0; flex-wrap:wrap;}
+    input[type="search"], input[type="date"]{ padding:.4rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; width: min(480px, 95%);}
     .pill { font-size:.8em; background:#eef2ff; color:#3730a3; padding:.15rem .5rem; border-radius:999px;}
     .btn { display:inline-block; padding:.25rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; font-size:.85em; }
     .btn:hover { background:#f3f4f6; }
@@ -62,10 +62,17 @@ TEMPLATE = r"""
   <div class="controls">
     <form method="get">
       <input type="hidden" name="sort" value="{{ sort }}">
+      {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
       <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename…" />
     </form>
+    <form method="get">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+      <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
+    </form>
     <div class="muted">Sorted by {{ 'newest' if sort=='time' else 'name' }} —
-      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}">switch</a>
+      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}">switch</a>
+      {% if date_filter %}<span class="pill">Date: {{ date_filter }}</span>{% endif %}
     </div>
   </div>
 
@@ -135,8 +142,9 @@ def fmt_size(n: int) -> str:
             return f"{n:.0f} {unit}" if unit=="B" else f"{n:.1f} {unit}"
         n /= 1024
 
-def fmt_time(ts: float) -> tuple[str, str]:
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
+def fmt_time(ts: float, *, dt: datetime | None = None) -> tuple[str, str]:
+    if dt is None:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()
     return dt.strftime("%Y-%m-%d %H:%M:%S"), dt.isoformat()
 
 def build_breadcrumbs(rel: str):
@@ -159,6 +167,14 @@ def browse(subpath: str):
 
     sort = request.args.get("sort", "time")  # 'time' or 'name'
     q = (request.args.get("q") or "").strip().lower()
+    date_raw = (request.args.get("date") or "").strip()
+    date_filter = None
+    if date_raw:
+        try:
+            date_filter = datetime.strptime(date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            date_filter = None
+    date_filter_str = date_filter.isoformat() if date_filter else None
 
     entries = []
     try:
@@ -175,8 +191,12 @@ def browse(subpath: str):
                 except FileNotFoundError:
                     continue
 
+                dt = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).astimezone()
+                if date_filter and dt.date() != date_filter:
+                    continue
+
                 size = stat.st_size if not is_dir else 0
-                t_human, t_iso = fmt_time(stat.st_mtime)
+                t_human, t_iso = fmt_time(stat.st_mtime, dt=dt)
                 ext = p.suffix
                 mimetype = mimetypes.guess_type(p.name)[0]
                 is_audio = (ext in AUDIO_EXTS) or (mimetype and mimetype.startswith("audio"))
@@ -209,7 +229,8 @@ def browse(subpath: str):
         breadcrumbs=breadcrumbs,
         parent_link=parent_link,
         sort=sort,
-        q=q
+        q=q,
+        date_filter=date_filter_str
     )
 
 @app.route("/file/<path:subpath>")
