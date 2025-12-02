@@ -11,7 +11,7 @@ from flask import (
 )
 
 # ====== CONFIG ======
-# Set this to your archive folder (note: typically "asterisk", not "asterix")
+# Set this to your archive folder
 ARCHIVE_ROOT = Path("/var/spool/asterisk/monitor/67146").resolve()
 
 # Bind + port
