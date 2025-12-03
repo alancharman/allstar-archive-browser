@@ -63,8 +63,18 @@ ensure_dir() {
 
 clone_or_update_repo() {
   if [[ -d "$INSTALL_DIR/.git" ]]; then
-    log "Updating existing repo in $INSTALL_DIR ..."
+    log "Updating existing git repo in $INSTALL_DIR ..."
     sudo -u "$APP_USER" git -C "$INSTALL_DIR" pull --ff-only
+  elif [[ -d "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]]; then
+    log "Existing non-empty dir at $INSTALL_DIR → converting it into a git checkout..."
+    sudo -u "$APP_USER" bash -lc "
+      set -e
+      cd '$INSTALL_DIR'
+      git init
+      git remote add origin '$GIT_URL' || git remote set-url origin '$GIT_URL'
+      git fetch origin
+      git checkout -B main origin/main
+    "
   else
     log "Cloning repo $GIT_URL into $INSTALL_DIR ..."
     sudo -u "$APP_USER" git clone "$GIT_URL" "$INSTALL_DIR"
