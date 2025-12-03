@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+import os
+import mimetypes
+from datetime import datetime, timezone
+from pathlib import Path
+from flask import Flask, request, send_from_directory, abort, render_template_string, url_for
+from werkzeug.utils import safe_join
+
+# >>>> CHANGE THIS if needed (asterix vs asterisk) <<<<
+ARCHIVE_ROOT = Path("/var/spool/asterisk/monitor/67146").resolve()
+
+# Optional: restrict to your LAN by binding host later to 0.0.0.0 but firewall accordingly.
+app = Flask(__name__)
+
+# Minimal allowlist of audio types commonly produced by Asterisk.
+AUDIO_EXTS = {".wav", ".mp3", ".WAV", ".gsm", ".ulaw", ".alaw"}
+
+TEMPLATE = r"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AllStar Archive — {{ rel if rel else '/' }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    body { margin: 2rem; }
+    a { text-decoration: none; }
+    .crumbs a { color: #0b57d0; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: .6rem .4rem; text-align: left; }
+    th { font-weight: 600; }
+    tr:hover { background: #f9fafb; }
+    .muted { color: #6b7280; font-size: .9em; }
+    .dir { font-weight: 600; }
+    .audio { display: block; margin-top: .3rem; width: 100%; max-width: 520px; }
+    .wrap { word-break: break-all; }
+    .controls { display:flex; gap:.5rem; align-items:center; margin:.25rem 0 1rem 0;}
+    input[type="search"]{ padding:.4rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; width: min(480px, 95%);}
+    .pill { font-size:.8em; background:#eef2ff; color:#3730a3; padding:.15rem .5rem; border-radius:999px;}
+  </style>
+</head>
+<body>
+  <h1>AllStar Archive <span class="pill">read-only</span></h1>
+  <div class="crumbs">
+    {% for name, link in breadcrumbs %}
+      <a href="{{ link }}">{{ name }}</a>{% if not loop.last %} / {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="controls">
+    <form method="get">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename…" />
+    </form>
+    <div class="muted">Sorted by {{ 'newest' if sort=='time' else 'name' }} —
+      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}">switch</a>
+    </div>
+  </div>
+
+  {% if parent_link %}
+    <p><a href="{{ parent_link }}">⬅ Up one level</a></p>
+  {% endif %}
+
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Size</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td class="wrap">
+            {% if item.is_dir %}
+              <span class="dir">📁 <a href="{{ url_for('browse', subpath=item.rel) }}">{{ item.name }}</a></span>
+            {% else %}
+              <span>🎵 <a href="{{ url_for('serve_file', subpath=item.rel) }}">{{ item.name }}</a></span>
+              {% if item.is_audio %}
+                <audio class="audio" controls preload="none">
+                  <source src="{{ url_for('serve_file', subpath=item.rel) }}" type="{{ item.mimetype or 'audio/wav' }}">
+                  Your browser can’t play this file; try downloading instead.
+                </audio>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td>{{ item.size_human if not item.is_dir else '—' }}</td>
+          <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not items %}
+    <p class="muted">No files here.</p>
+  {% endif %}
+</body>
+</html>
+"""
+
+def within_root(path: Path) -> Path:
+    """Ensure path stays inside ARCHIVE_ROOT."""
+    try:
+        resolved = path.resolve()
+    except FileNotFoundError:
+        resolved = path
+    if ARCHIVE_ROOT not in resolved.parents and resolved != ARCHIVE_ROOT:
+        abort(404)
+    return resolved
+
+def fmt_size(n: int) -> str:
+    for unit in ("B","KB","MB","GB","TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit=="B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+def fmt_time(ts: float) -> tuple[str, str]:
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone()  # local timezone
+    return dt.strftime("%Y-%m-%d %H:%M:%S"), dt.isoformat()
+
+def build_breadcrumbs(rel: str):
+    parts = [p for p in Path(rel).parts if p]
+    crumbs = [("Home", url_for('browse', subpath=""))]
+    acc = Path()
+    for p in parts:
+        acc /= p
+        crumbs.append((p, url_for('browse', subpath=str(acc))))
+    return crumbs
+
+@app.route("/", defaults={"subpath": ""})
+@app.route("/browse/", defaults={"subpath": ""})
+@app.route("/browse/<path:subpath>")
+def browse(subpath: str):
+    # Normalize and keep within root
+    rel = Path(subpath)
+    base = within_root(ARCHIVE_ROOT / rel)
+
+    if not base.exists() or not base.is_dir():
+        abort(404)
+
+    # Sorting and filtering
+    sort = request.args.get("sort", "time")  # 'time' or 'name'
+    q = (request.args.get("q") or "").strip().lower()
+
+    entries = []
+    try:
+        with os.scandir(base) as it:
+            for de in it:
+                # skip hidden files
+                if de.name.startswith("."):
+                    continue
+                # Filter by simple substring match on filename
+                if q and q not in de.name.lower():
+                    continue
+
+                p = Path(de.path)
+                is_dir = de.is_dir(follow_symlinks=False)
+                try:
+                    stat = de.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    # vanished file
+                    continue
+
+                size = stat.st_size if not is_dir else 0
+                t_human, t_iso = fmt_time(stat.st_mtime)
+                ext = p.suffix
+                mimetype = mimetypes.guess_type(p.name)[0]
+                is_audio = (ext in AUDIO_EXTS) or (mimetype and mimetype.startswith("audio"))
+
+                entries.append({
+                    "name": de.name,
+                    "rel": str((rel / de.name).as_posix()),
+                    "is_dir": is_dir,
+                    "size_human": fmt_size(size),
+                    "time_human": t_human,
+                    "time_iso": t_iso,
+                    "is_audio": is_audio,
+                    "mimetype": mimetype,
+                    "sort_key": (0 if is_dir else 1,  # folders first
+                                 -stat.st_mtime if sort=="time" else de.name.lower())
+                })
+    except PermissionError:
+        abort(403)
+
+    entries.sort(key=lambda x: x["sort_key"])
+
+    # Breadcrumbs and parent link
+    breadcrumbs = build_breadcrumbs(rel.as_posix())
+    parent_link = None
+    if rel.as_posix() not in ("", "."):
+        parent_link = url_for('browse', subpath=str(rel.parent.as_posix()))
+
+    return render_template_string(
+        TEMPLATE,
+        items=entries,
+        rel=rel.as_posix(),
+        breadcrumbs=breadcrumbs,
+        parent_link=parent_link,
+        sort=sort,
+        q=q
+    )
+
+@app.route("/file/<path:subpath>")
+def serve_file(subpath: str):
+    # Serve a file from within ARCHIVE_ROOT with Range support (Werkzeug handles it via send_from_directory)
+    rel = Path(subpath)
+    full = within_root(ARCHIVE_ROOT / rel)
+
+    if not full.exists() or not full.is_file():
+        abort(404)
+
+    directory = str(full.parent)
+    filename = full.name
+    # conditional=True enables ETag/If-Modified-Since and Range handling in recent Werkzeug/Flask
+    return send_from_directory(directory, filename, as_attachment=False, conditional=True)
+
+# Convenience redirect: clicking names in the table uses /file/...
+@app.route("/download/<path:subpath>")
+def download_file(subpath: str):
+    rel = Path(subpath)
+    full = within_root(ARCHIVE_ROOT / rel)
+    if not full.exists() or not full.is_file():
+        abort(404)
+    return send_from_directory(str(full.parent), full.name, as_attachment=True, conditional=True)
+
+if __name__ == "__main__":
+    # For quick testing:
+    #   python3 archive_browser.py
+    # Then open http://127.0.0.1:5000/
+    app.run(host="0.0.0.0", port=5000, debug=False)
