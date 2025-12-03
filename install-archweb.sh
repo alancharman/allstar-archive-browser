@@ -64,26 +64,45 @@ ensure_dir() {
 clone_or_update_repo() {
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Updating existing git repo in $INSTALL_DIR ..."
-    sudo -u "$APP_USER" git -C "$INSTALL_DIR" pull --ff-only
-  elif [[ -d "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]]; then
-    log "Existing non-empty dir at $INSTALL_DIR → converting it into a git checkout..."
     sudo -u "$APP_USER" bash -lc "
       set -e
       cd '$INSTALL_DIR'
-      git init
-      git remote add origin '$GIT_URL' || git remote set-url origin '$GIT_URL'
-      git fetch origin
-
-      # backup any files that would be overwritten
-      CONFLICTS=\$(git diff --name-only --diff-filter=U origin/main || true)
-      # or simpler: just back up known files before forcing checkout
+      # Ensure correct remote
+      if ! git remote | grep -qx origin; then
+        git remote add origin '$GIT_URL'
+      else
+        git remote set-url origin '$GIT_URL'
+      fi
+      git fetch --prune origin
+      # Ensure we're on 'main' and track origin/main
+      git checkout -B main || true
+      git branch --set-upstream-to=origin/main main 2>/dev/null || true
+      # Hard reset to remote state (idempotent deploy)
+      git reset --hard origin/main
+      git clean -fd
+    "
+  elif [[ -d "$INSTALL_DIR" && -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]]; then
+    log "Existing non-empty dir at $INSTALL_DIR → converting to a git checkout..."
+    sudo -u "$APP_USER" bash -lc "
+      set -e
+      cd '$INSTALL_DIR'
+      # Backup common local files that might be overwritten
       BK=\$HOME/archweb_backup_\$(date +%s)
       mkdir -p \"\$BK\"
-      for f in archive_browser.py install-archweb.sh; do
-        [ -f \"\$f\" ] && cp -a \"\$f\" \"\$BK/\"
+      for f in archive_browser.py install-archweb.sh README.md requirements.txt .gitignore; do
+        [ -e \"\$f\" ] && cp -a \"\$f\" \"\$BK/\" || true
       done
-
-      git checkout -B main origin/main -f
+      # Initialize and point at the right remote
+      git init
+      if ! git remote | grep -qx origin; then
+        git remote add origin '$GIT_URL'
+      else
+        git remote set-url origin '$GIT_URL'
+      fi
+      git fetch --prune origin
+      git checkout -B main origin/main
+      git reset --hard origin/main
+      git clean -fd
     "
   else
     log "Cloning repo $GIT_URL into $INSTALL_DIR ..."
