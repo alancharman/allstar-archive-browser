@@ -10,3 +10,14 @@ __pycache__/
 
 # Logs
 *.log
+*.bak
+*.backup
+*~
+*.swp
+*.tmp
+*.old
+*.orig
+*.rej
+*.save
+backup/
+backups/
