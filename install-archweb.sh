@@ -73,7 +73,17 @@ clone_or_update_repo() {
       git init
       git remote add origin '$GIT_URL' || git remote set-url origin '$GIT_URL'
       git fetch origin
-      git checkout -B main origin/main
+
+      # backup any files that would be overwritten
+      CONFLICTS=\$(git diff --name-only --diff-filter=U origin/main || true)
+      # or simpler: just back up known files before forcing checkout
+      BK=\$HOME/archweb_backup_\$(date +%s)
+      mkdir -p \"\$BK\"
+      for f in archive_browser.py install-archweb.sh; do
+        [ -f \"\$f\" ] && cp -a \"\$f\" \"\$BK/\"
+      done
+
+      git checkout -B main origin/main -f
     "
   else
     log "Cloning repo $GIT_URL into $INSTALL_DIR ..."
