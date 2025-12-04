@@ -207,6 +207,8 @@ enable_service() {
   log "Enabling and starting ${SERVICE_NAME}.service ..."
   systemctl daemon-reload
   systemctl enable --now "${SERVICE_NAME}.service"
+  # Restart to pick up updates even if the service was already running
+  systemctl restart "${SERVICE_NAME}.service"
   systemctl --no-pager --full status "${SERVICE_NAME}.service" || true
 }
 
