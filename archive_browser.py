@@ -167,13 +167,16 @@ def browse(subpath: str):
 
     sort = request.args.get("sort", "time")  # 'time' or 'name'
     q = (request.args.get("q") or "").strip().lower()
-    date_raw = (request.args.get("date") or "").strip()
+    date_param_present = "date" in request.args
+    date_raw = (request.args.get("date") or "").strip() if date_param_present else ""
     date_filter = None
     if date_raw:
         try:
             date_filter = datetime.strptime(date_raw, "%Y-%m-%d").date()
         except ValueError:
             date_filter = None
+    elif not date_param_present:
+        date_filter = datetime.now().astimezone().date()
     date_filter_str = date_filter.isoformat() if date_filter else None
 
     entries = []
