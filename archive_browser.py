@@ -270,30 +270,14 @@ def parse_date_filter(date_raw: str, *, date_param_present: bool):
     return date_filter
 
 
-def concat_manifest(paths: list[Path]) -> bytes:
-    lines = []
-    for path in paths:
-        escaped = str(path).replace("\\", "\\\\").replace("'", r"\'")
-        lines.append(f"file '{escaped}'")
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def stream_ffmpeg_mp3(cmd: list[str], *, stdin_bytes: bytes | None = None, download_name: str | None = None) -> Response:
+def stream_ffmpeg_mp3(cmd: list[str], *, download_name: str | None = None) -> Response:
     try:
         proc = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE if stdin_bytes is not None else None,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
         )
     except FileNotFoundError:
         abort(500)
-
-    if stdin_bytes is not None:
-        if not proc.stdin:
-            abort(500)
-        proc.stdin.write(stdin_bytes)
-        proc.stdin.close()
 
     if not proc.stdout:
         abort(500)
@@ -338,28 +322,27 @@ def stream_transcoded_file(path: Path, *, download_name: str | None = None) -> R
 
 
 def stream_combined_mp3(paths: list[Path], *, download_name: str | None = None) -> Response:
-    cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-protocol_whitelist",
-        "file,pipe",
-        "-i",
-        "-",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-f",
-        "mp3",
-        "-",
-    ]
-    return stream_ffmpeg_mp3(cmd, stdin_bytes=concat_manifest(paths), download_name=download_name)
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    for path in paths:
+        cmd.extend(["-i", str(path)])
+
+    audio_inputs = "".join(f"[{idx}:a]" for idx in range(len(paths)))
+    cmd.extend(
+        [
+            "-filter_complex",
+            f"{audio_inputs}concat=n={len(paths)}:v=0:a=1[outa]",
+            "-map",
+            "[outa]",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "mp3",
+            "-",
+        ]
+    )
+    return stream_ffmpeg_mp3(cmd, download_name=download_name)
 
 
 def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, error_message: str | None = None):
