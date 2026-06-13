@@ -40,164 +40,443 @@ TEMPLATE = r"""
   <title>AllStar Archive - {{ rel if rel else '/' }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-    body { margin: 2rem; }
-    a { text-decoration: none; }
-    .crumbs a { color: #0b57d0; }
-    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: .6rem .4rem; text-align: left; vertical-align: top; }
-    th { font-weight: 600; }
-    tr:hover { background: #f9fafb; }
-    .muted { color: #6b7280; font-size: .9em; }
-    .dir { font-weight: 600; }
-    .audio { display: block; margin-top: .3rem; width: 100%; max-width: 520px; }
-    .wrap { word-break: break-all; }
-    .controls { display:flex; gap:.75rem; align-items:center; margin:.25rem 0 1rem 0; flex-wrap:wrap; }
-    input[type="search"], input[type="date"] { padding:.4rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; width: min(480px, 95%); }
-    .pill { font-size:.8em; background:#eef2ff; color:#3730a3; padding:.15rem .5rem; border-radius:999px; }
-    .btn { display:inline-block; padding:.25rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; font-size:.85em; color:inherit; background:#fff; cursor:pointer; }
-    .btn:hover { background:#f3f4f6; }
-    .sel { width: 3.5rem; text-align:center; }
-    .qso-tools { margin: 1rem 0; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; }
-    .error { margin-top: 1rem; padding: .75rem 1rem; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; border-radius: .5rem; }
-    .pager { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; margin: 1rem 0; }
-    .pager form { display:inline-flex; gap:.5rem; align-items:center; }
-    select { padding:.35rem .5rem; border:1px solid #d1d5db; border-radius:.5rem; }
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --bg: #f3f6fb;
+      --panel: rgba(255, 255, 255, 0.88);
+      --panel-strong: #ffffff;
+      --line: #d7dfec;
+      --line-soft: #e7edf6;
+      --text: #142033;
+      --muted: #5f6f86;
+      --accent: #0f62fe;
+      --accent-soft: #e8f0ff;
+      --accent-strong: #123f99;
+      --danger-bg: #fff1f0;
+      --danger-line: #f3bbb2;
+      --danger-text: #a63321;
+      --shadow: 0 18px 48px rgba(18, 40, 82, 0.10);
+      --radius: 18px;
+      --radius-sm: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(15, 98, 254, 0.14), transparent 26%),
+        radial-gradient(circle at top right, rgba(34, 197, 94, 0.10), transparent 22%),
+        linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+    a { color: inherit; text-decoration: none; }
+    .shell {
+      width: min(1280px, calc(100% - 2rem));
+      margin: 1.25rem auto 2rem;
+    }
+    .hero {
+      background: linear-gradient(135deg, rgba(15, 98, 254, 0.92), rgba(22, 78, 190, 0.88));
+      color: #fff;
+      border-radius: 24px;
+      padding: 1.4rem 1.5rem 1.2rem;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -8% -42% auto;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.10);
+      filter: blur(8px);
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3vw, 2.5rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    .hero-copy {
+      margin-top: .5rem;
+      color: rgba(255, 255, 255, 0.86);
+      max-width: 60rem;
+    }
+    .crumbs {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem;
+      align-items: center;
+      color: rgba(255, 255, 255, 0.86);
+      font-size: .95rem;
+    }
+    .crumbs a {
+      padding: .3rem .55rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .content {
+      margin-top: 1rem;
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 1rem;
+    }
+    .controls {
+      display: flex;
+      gap: .85rem;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: .35rem 0 .75rem;
+    }
+    .controls form {
+      display: inline-flex;
+      gap: .55rem;
+      align-items: center;
+    }
+    input[type="search"], input[type="date"], select {
+      min-height: 42px;
+      padding: .55rem .8rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-strong);
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+    input[type="search"] { width: min(420px, 92vw); }
+    input[type="search"]:focus, input[type="date"]:focus, select:focus {
+      outline: 2px solid rgba(15, 98, 254, 0.18);
+      border-color: rgba(15, 98, 254, 0.35);
+    }
+    .status {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: .55rem;
+      align-items: center;
+      color: var(--muted);
+      font-size: .92rem;
+    }
+    .muted { color: var(--muted); font-size: .92rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .78rem;
+      font-weight: 600;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      padding: .28rem .7rem;
+      border-radius: 999px;
+      letter-spacing: .01em;
+    }
+    .up-link {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      margin: .35rem 0 0;
+      padding: .55rem .8rem;
+      border-radius: 999px;
+      color: var(--accent-strong);
+      background: #eef4ff;
+      font-weight: 600;
+    }
+    .qso-tools, .pager {
+      display: flex;
+      gap: .75rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .45rem;
+      min-height: 42px;
+      padding: .55rem .9rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: .9rem;
+      font-weight: 600;
+      color: var(--text);
+      background: linear-gradient(180deg, #ffffff 0%, #f5f8fd 100%);
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(18, 40, 82, 0.06);
+    }
+    .btn:hover {
+      border-color: rgba(15, 98, 254, 0.34);
+      background: linear-gradient(180deg, #ffffff 0%, #eef4ff 100%);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #0f62fe 0%, #1654d1 100%);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 14px 26px rgba(15, 98, 254, 0.22);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0c57e3 0%, #1249b6 100%);
+      border-color: transparent;
+    }
+    .sel {
+      width: 4.2rem;
+      text-align: center;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.82);
+    }
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line-soft);
+      padding: .9rem .8rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      font-size: .78rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: rgba(241, 245, 252, 0.96);
+    }
+    tbody tr:hover { background: rgba(15, 98, 254, 0.045); }
+    tbody tr:last-child td { border-bottom: none; }
+    .dir, .file-label {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .dir::before, .file-label::before {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 12px;
+      font-size: .92rem;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+    .dir::before {
+      content: "D";
+      background: #edf4ff;
+      color: #1f4aa8;
+    }
+    .file-label::before {
+      content: "A";
+      background: #eefbf2;
+      color: #1f7a38;
+    }
+    .audio {
+      display: block;
+      margin-top: .6rem;
+      width: 100%;
+      max-width: 520px;
+      border-radius: 999px;
+      filter: saturate(.95);
+    }
+    .file-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem;
+      margin-top: .55rem;
+    }
+    .wrap { word-break: break-word; }
+    .empty {
+      padding: 1rem;
+      border-radius: var(--radius-sm);
+      background: #f7f9fc;
+    }
+    .error {
+      margin-top: 1rem;
+      padding: .85rem 1rem;
+      border: 1px solid var(--danger-line);
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+    }
+    .helper-card {
+      padding: .9rem 1rem;
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, #fbfcff 0%, #f3f7fe 100%);
+      border: 1px solid var(--line-soft);
+    }
+    @media (max-width: 780px) {
+      .shell { width: min(100% - 1rem, 100%); margin: .5rem auto 1rem; }
+      .hero { padding: 1.1rem 1rem; border-radius: 20px; }
+      .content { padding: .8rem; border-radius: 20px; }
+      th, td { padding: .75rem .6rem; }
+      .sel { width: 3.2rem; }
+      .btn, input[type="search"], input[type="date"], select { width: 100%; }
+      .controls form { width: 100%; }
+      .status { width: 100%; }
+      .qso-tools .btn { width: auto; }
+    }
   </style>
 </head>
 <body>
-  <h1>AllStar Archive <span class="pill">read-only</span></h1>
-  <div class="crumbs">
-    {% for name, link in breadcrumbs %}
-      <a href="{{ link }}">{{ name }}</a>{% if not loop.last %} / {% endif %}
-    {% endfor %}
-  </div>
-
-  <div class="controls">
-    <form method="get">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
-      <input type="hidden" name="per_page" value="{{ per_page }}">
-      <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
-    </form>
-    <form method="get">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
-      <input type="hidden" name="per_page" value="{{ per_page }}">
-      <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
-    </form>
-    <form method="get">
-      <input type="hidden" name="sort" value="{{ sort }}">
-      {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
-      {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
-      <label class="muted" for="per_page">Per page</label>
-      <select id="per_page" name="per_page" onchange="this.form.submit()">
-        {% for option in per_page_options %}
-          <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option|upper }}</option>
+  <div class="shell">
+    <section class="hero">
+      <h1>AllStar Archive <span class="pill">Read Only</span></h1>
+      <p class="hero-copy">Browse recordings, listen in the browser, and assemble a full QSO from matching clips without leaving the page.</p>
+      <div class="crumbs">
+        {% for name, link in breadcrumbs %}
+          <a href="{{ link }}">{{ name }}</a>
         {% endfor %}
-      </select>
-    </form>
-    <div class="muted">Sorted by {{ 'newest' if sort=='time' else 'name' }} -
-      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">switch</a>
-      {% if date_filter %}<span class="pill">Date: {{ date_filter }}</span>{% endif %}
-    </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="controls">
+        <form method="get">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+          <input type="hidden" name="per_page" value="{{ per_page }}">
+          <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
+        </form>
+        <form method="get">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+          <input type="hidden" name="per_page" value="{{ per_page }}">
+          <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
+        </form>
+        <form method="get">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+          {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+          <label class="muted" for="per_page">Per page</label>
+          <select id="per_page" name="per_page" onchange="this.form.submit()">
+            {% for option in per_page_options %}
+              <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option|upper }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        <div class="status">
+          <span>Sorted by <strong>{{ 'newest' if sort=='time' else 'name' }}</strong></span>
+          <a class="pill" href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">Switch Sort</a>
+          {% if date_filter %}<span class="pill">Date {{ date_filter }}</span>{% endif %}
+        </div>
+      </div>
+
+      {% if parent_link %}
+        <p><a class="up-link" href="{{ parent_link }}">Back up one level</a></p>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('qso_builder') }}">
+        <input type="hidden" name="subpath" value="{{ rel if rel != '.' else '' }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="q" value="{{ q or '' }}">
+        <input type="hidden" name="date" value="{{ date_filter or '' }}">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <input type="hidden" name="page" value="{{ page }}">
+
+        <div class="helper-card">
+          <div class="qso-tools">
+            <button class="btn btn-primary" type="submit" name="scope" value="selected">Build Combined Clip</button>
+            <button class="btn" type="submit" name="scope" value="all_day">Build All Audio For This Day</button>
+            <span class="muted">Combined clips always follow timestamp order and ignore non-audio files.</span>
+          </div>
+        </div>
+
+        {% if total_pages > 1 %}
+          <div class="pager">
+            {% if page > 1 %}
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+            {% endif %}
+            <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
+            {% if page < total_pages %}
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="sel">QSO</th>
+                <th>Name</th>
+                <th>Size</th>
+                <th>Modified</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in items %}
+                <tr>
+                  <td class="sel">
+                    {% if item.is_audio %}
+                      <input type="checkbox" name="files" value="{{ item.rel }}">
+                    {% endif %}
+                  </td>
+                  <td class="wrap">
+                    {% if item.is_dir %}
+                      <span class="dir"><a href="{{ url_for('browse', subpath=item.rel) }}">{{ item.name }}</a></span>
+                    {% else %}
+                      <span class="file-label"><a href="{{ url_for('serve_file', subpath=item.rel) }}">{{ item.name }}</a></span>
+                      {% if item.is_audio %}
+                        <div>
+                          <audio class="audio" controls preload="none">
+                            <source src="{{ url_for('stream_transcoded', subpath=item.rel) }}" type="audio/mpeg">
+                            <source src="{{ url_for('serve_file', subpath=item.rel) }}" type="{{ item.mimetype or 'audio/wav' }}">
+                            Your browser cannot play this file; try downloading instead.
+                          </audio>
+                          <div class="file-actions">
+                            <a class="btn" href="{{ url_for('stream_transcoded', subpath=item.rel) }}" download="{{ item.name.rsplit('.',1)[0] }}.mp3">Download MP3</a>
+                            <a class="btn" href="{{ url_for('download_file', subpath=item.rel) }}">Download Original</a>
+                          </div>
+                        </div>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                  <td>{{ item.size_human if not item.is_dir else '-' }}</td>
+                  <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if total_pages > 1 %}
+          <div class="pager">
+            {% if page > 1 %}
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+            {% endif %}
+            <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
+            {% if page < total_pages %}
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+            {% endif %}
+          </div>
+        {% endif %}
+      </form>
+
+      {% if error_message %}
+        <div class="error">{{ error_message }}</div>
+      {% endif %}
+
+      {% if not items %}
+        <div class="empty muted">No files here.</div>
+      {% endif %}
+    </section>
   </div>
-
-  {% if parent_link %}
-    <p><a href="{{ parent_link }}">Up one level</a></p>
-  {% endif %}
-
-  <form method="post" action="{{ url_for('qso_builder') }}">
-    <input type="hidden" name="subpath" value="{{ rel if rel != '.' else '' }}">
-    <input type="hidden" name="sort" value="{{ sort }}">
-    <input type="hidden" name="q" value="{{ q or '' }}">
-    <input type="hidden" name="date" value="{{ date_filter or '' }}">
-    <input type="hidden" name="per_page" value="{{ per_page }}">
-    <input type="hidden" name="page" value="{{ page }}">
-
-    <div class="qso-tools">
-      <button class="btn" type="submit" name="scope" value="selected">Build Combined Clip</button>
-      <button class="btn" type="submit" name="scope" value="all_day">Build All Audio For This Day</button>
-      <span class="muted">Combined clips always follow timestamp order and ignore non-audio files.</span>
-    </div>
-
-    {% if total_pages > 1 %}
-      <div class="pager">
-        {% if page > 1 %}
-          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
-        {% endif %}
-        <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
-        {% if page < total_pages %}
-          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
-        {% endif %}
-      </div>
-    {% endif %}
-
-    <table>
-      <thead>
-        <tr>
-          <th class="sel">QSO</th>
-          <th>Name</th>
-          <th>Size</th>
-          <th>Modified</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-          <tr>
-            <td class="sel">
-              {% if item.is_audio %}
-                <input type="checkbox" name="files" value="{{ item.rel }}">
-              {% endif %}
-            </td>
-            <td class="wrap">
-              {% if item.is_dir %}
-                <span class="dir">DIR <a href="{{ url_for('browse', subpath=item.rel) }}">{{ item.name }}</a></span>
-              {% else %}
-                <span>AUDIO <a href="{{ url_for('serve_file', subpath=item.rel) }}">{{ item.name }}</a></span>
-                {% if item.is_audio %}
-                  <div>
-                    <audio class="audio" controls preload="none">
-                      <source src="{{ url_for('stream_transcoded', subpath=item.rel) }}" type="audio/mpeg">
-                      <source src="{{ url_for('serve_file', subpath=item.rel) }}" type="{{ item.mimetype or 'audio/wav' }}">
-                      Your browser cannot play this file; try downloading instead.
-                    </audio>
-                    <div>
-                      <a class="btn" href="{{ url_for('stream_transcoded', subpath=item.rel) }}" download="{{ item.name.rsplit('.',1)[0] }}.mp3">Download MP3</a>
-                      <a class="btn" href="{{ url_for('download_file', subpath=item.rel) }}">Download Original</a>
-                    </div>
-                  </div>
-                {% endif %}
-              {% endif %}
-            </td>
-            <td>{{ item.size_human if not item.is_dir else '-' }}</td>
-            <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    {% if total_pages > 1 %}
-      <div class="pager">
-        {% if page > 1 %}
-          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
-        {% endif %}
-        <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
-        {% if page < total_pages %}
-          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
-        {% endif %}
-      </div>
-    {% endif %}
-
-  </form>
-
-  {% if error_message %}
-    <div class="error">{{ error_message }}</div>
-  {% endif %}
-
-  {% if not items %}
-    <p class="muted">No files here.</p>
-  {% endif %}
 </body>
 </html>
 """
@@ -210,37 +489,119 @@ QSO_TEMPLATE = r"""
   <title>QSO Builder</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-    body { margin: 2rem; max-width: 960px; }
-    .muted { color: #6b7280; }
-    .pill { font-size:.8em; background:#eef2ff; color:#3730a3; padding:.15rem .5rem; border-radius:999px; }
+    :root {
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --bg: #f3f6fb;
+      --panel: rgba(255, 255, 255, 0.9);
+      --line: #dce4ef;
+      --text: #142033;
+      --muted: #5f6f86;
+      --accent: #0f62fe;
+      --accent-soft: #e8f0ff;
+      --accent-strong: #123f99;
+      --shadow: 0 18px 48px rgba(18, 40, 82, 0.10);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(15, 98, 254, 0.14), transparent 26%),
+        linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+    .shell { width: min(980px, calc(100% - 2rem)); margin: 1.25rem auto 2rem; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 1.4rem;
+      backdrop-filter: blur(18px);
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 3vw, 2.4rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      font-size:.78rem;
+      font-weight: 700;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      padding:.25rem .65rem;
+      border-radius:999px;
+    }
     .actions { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; margin: 1rem 0; }
-    .btn { display:inline-block; padding:.4rem .7rem; border:1px solid #d1d5db; border-radius:.5rem; font-size:.9em; text-decoration:none; color:inherit; background:#fff; }
-    .btn:hover { background:#f3f4f6; }
-    audio { width:100%; max-width:720px; margin: 1rem 0; }
-    ol { padding-left: 1.4rem; }
+    .btn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:42px;
+      padding:.55rem .9rem;
+      border:1px solid var(--line);
+      border-radius:999px;
+      font-size:.92rem;
+      font-weight: 600;
+      text-decoration:none;
+      color:inherit;
+      background:#fff;
+      box-shadow: 0 8px 20px rgba(18, 40, 82, 0.06);
+    }
+    .btn:hover { background:#f4f8ff; border-color: rgba(15, 98, 254, 0.34); }
+    audio {
+      width:100%;
+      max-width:720px;
+      margin: 1rem 0;
+      border-radius: 999px;
+    }
+    .list-card {
+      margin-top: 1rem;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.68);
+    }
+    ol { padding-left: 1.4rem; margin-bottom: 0; }
+    li + li { margin-top: .35rem; }
+    @media (max-width: 780px) {
+      .shell { width: min(100% - 1rem, 100%); margin: .5rem auto 1rem; }
+      .panel { padding: 1rem; border-radius: 20px; }
+      .actions .btn { width: 100%; }
+    }
   </style>
 </head>
 <body>
-  <h1>QSO Builder <span class="pill">{{ count }} clips</span></h1>
-  <p class="muted">The combined clip follows the order from the page where you selected the items.</p>
+  <div class="shell">
+    <section class="panel">
+      <h1>QSO Builder <span class="pill">{{ count }} clips</span></h1>
+      <p class="muted">The combined clip follows timestamp order from the selected archive view.</p>
 
-  <div class="actions">
-    <a class="btn" href="{{ stream_url }}">Play Combined Stream</a>
-    <a class="btn" href="{{ download_url }}">Download Combined MP3</a>
-    <a class="btn" href="{{ back_url }}">Back to Archive</a>
+      <div class="actions">
+        <a class="btn" href="{{ stream_url }}">Play Combined Stream</a>
+        <a class="btn" href="{{ download_url }}">Download Combined MP3</a>
+        <a class="btn" href="{{ back_url }}">Back to Archive</a>
+      </div>
+
+      <audio controls preload="none" src="{{ stream_url }}">
+        Your browser cannot play this combined clip; try the download link instead.
+      </audio>
+
+      <div class="list-card">
+        <h2>Included Clips</h2>
+        <ol>
+          {% for item in items %}
+            <li>{{ item }}</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </section>
   </div>
-
-  <audio controls preload="none" src="{{ stream_url }}">
-    Your browser cannot play this combined clip; try the download link instead.
-  </audio>
-
-  <h2>Included Clips</h2>
-  <ol>
-    {% for item in items %}
-      <li>{{ item }}</li>
-    {% endfor %}
-  </ol>
 </body>
 </html>
 """
