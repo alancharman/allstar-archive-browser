@@ -32,6 +32,16 @@ pkg_install() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
 }
 
+ensure_firewall_port() {
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    log "Opening TCP port ${APP_PORT} in firewalld ..."
+    firewall-cmd --permanent --add-port="${APP_PORT}/tcp"
+    firewall-cmd --reload
+  else
+    log "firewall-cmd not found; skipping firewall changes for port ${APP_PORT}."
+  fi
+}
+
 prompt_node_number() {
   local node
   if [[ -n "${NODE_NUMBER:-}" ]]; then
@@ -247,6 +257,7 @@ main() {
   patch_archive_root_in_code "$NODE_NUMBER"
   patch_bind_port_in_code "$APP_PORT"
   ensure_archive_permissions "$ARCHIVE_ROOT"
+  ensure_firewall_port
   write_systemd_unit
   enable_service
 
