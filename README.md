@@ -8,13 +8,59 @@ sudo apt-get update && sudo apt-get install -y python3-venv ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-# Run the feature-branch app locally
 python3 archive_browser.py
 ```
 
 ## Config
-Configure: edit ARCHIVE_ROOT in archive_browser.py to match your node path
-(e.g. /var/spool/asterisk/monitor/67146).
+Runtime config is supplied by environment variables:
+
+- `ARCHIVE_ROOT` defaults to `/var/spool/asterisk/monitor/67146`
+- `BIND_HOST` defaults to `0.0.0.0`
+- `BIND_PORT` defaults to `5000`
+
+Examples:
+
+```bash
+ARCHIVE_ROOT=/var/spool/asterisk/monitor/67146 BIND_PORT=5000 python3 archive_browser.py
+```
+
+```powershell
+$env:ARCHIVE_ROOT="D:\path\to\sample-archive\67146"
+$env:BIND_PORT="5002"
+python archive_browser.py
+```
+
+## Local Windows Testing
+Put test recordings under `sample-archive/67146/`.
+
+One-time setup:
+
+```powershell
+python -m venv .venv-local
+.\.venv-local\Scripts\python -m pip install -r requirements.txt
+```
+
+Requirements:
+
+- `ffmpeg` must be installed on Windows and available on `PATH`
+- `.venv-local` is used for local testing because the repo's Linux-style `.venv` may not match this machine
+
+Run locally:
+
+```powershell
+.\run-local.ps1
+```
+
+That starts the app with:
+
+- `ARCHIVE_ROOT=sample-archive\67146`
+- `BIND_PORT=5002`
+
+Then open:
+
+```text
+http://127.0.0.1:5002/browse/
+```
 
 ## Install as a systemd service
 Prerequisite: you should already have a working AllStarLink node with the archive/recording function configured and verified (recordings landing under `/var/spool/asterisk/monitor/<your-node>`).
