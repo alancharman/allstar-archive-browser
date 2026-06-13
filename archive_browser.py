@@ -56,7 +56,7 @@ TEMPLATE = r"""
     .btn { display:inline-block; padding:.25rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; font-size:.85em; color:inherit; background:#fff; cursor:pointer; }
     .btn:hover { background:#f3f4f6; }
     .sel { width: 3.5rem; text-align:center; }
-    .qso-tools { margin-top: 1rem; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; }
+    .qso-tools { margin: 1rem 0; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; }
     .error { margin-top: 1rem; padding: .75rem 1rem; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; border-radius: .5rem; }
   </style>
 </head>
@@ -94,6 +94,12 @@ TEMPLATE = r"""
     <input type="hidden" name="sort" value="{{ sort }}">
     <input type="hidden" name="q" value="{{ q or '' }}">
     <input type="hidden" name="date" value="{{ date_filter or '' }}">
+
+    <div class="qso-tools">
+      <button class="btn" type="submit">Build Combined Clip</button>
+      <span class="muted">Selected clips will be combined in timestamp order.</span>
+    </div>
+
     <table>
       <thead>
         <tr>
@@ -138,10 +144,6 @@ TEMPLATE = r"""
       </tbody>
     </table>
 
-    <div class="qso-tools">
-      <button class="btn" type="submit">Build Combined Clip</button>
-      <span class="muted">Select visible audio clips in playback order, then build one combined stream.</span>
-    </div>
   </form>
 
   {% if error_message %}
@@ -240,7 +242,7 @@ def is_audio_path(path: Path) -> bool:
 
 
 def resolve_selected_audio(subpaths: list[str]) -> list[Path]:
-    files: list[Path] = []
+    files: list[tuple[float, str, Path]] = []
     seen: set[Path] = set()
     for subpath in subpaths:
         rel = Path(subpath)
@@ -252,10 +254,15 @@ def resolve_selected_audio(subpaths: list[str]) -> list[Path]:
         if full in seen:
             continue
         seen.add(full)
-        files.append(full)
+        try:
+            stat = full.stat()
+        except FileNotFoundError:
+            abort(404)
+        files.append((stat.st_mtime, full.name.lower(), full))
     if not files:
         abort(400)
-    return files
+    files.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in files]
 
 
 def parse_date_filter(date_raw: str, *, date_param_present: bool):
