@@ -26,6 +26,8 @@ BIND_PORT = 5000
 
 # Allowlist of audio extensions we'll show a player for (still OK to download others)
 AUDIO_EXTS = {".wav", ".WAV", ".mp3", ".MP3", ".gsm", ".ulaw", ".alaw"}
+PER_PAGE_OPTIONS = ("10", "20", "30", "all")
+DEFAULT_PER_PAGE = "20"
 
 # ====== APP ======
 app = Flask(__name__)
@@ -58,6 +60,9 @@ TEMPLATE = r"""
     .sel { width: 3.5rem; text-align:center; }
     .qso-tools { margin: 1rem 0; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; }
     .error { margin-top: 1rem; padding: .75rem 1rem; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; border-radius: .5rem; }
+    .pager { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; margin: 1rem 0; }
+    .pager form { display:inline-flex; gap:.5rem; align-items:center; }
+    select { padding:.35rem .5rem; border:1px solid #d1d5db; border-radius:.5rem; }
   </style>
 </head>
 <body>
@@ -72,15 +77,28 @@ TEMPLATE = r"""
     <form method="get">
       <input type="hidden" name="sort" value="{{ sort }}">
       {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+      <input type="hidden" name="per_page" value="{{ per_page }}">
       <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
     </form>
     <form method="get">
       <input type="hidden" name="sort" value="{{ sort }}">
       {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+      <input type="hidden" name="per_page" value="{{ per_page }}">
       <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
     </form>
+    <form method="get">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+      {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+      <label class="muted" for="per_page">Per page</label>
+      <select id="per_page" name="per_page" onchange="this.form.submit()">
+        {% for option in per_page_options %}
+          <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option|upper }}</option>
+        {% endfor %}
+      </select>
+    </form>
     <div class="muted">Sorted by {{ 'newest' if sort=='time' else 'name' }} -
-      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}">switch</a>
+      <a href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">switch</a>
       {% if date_filter %}<span class="pill">Date: {{ date_filter }}</span>{% endif %}
     </div>
   </div>
@@ -94,11 +112,26 @@ TEMPLATE = r"""
     <input type="hidden" name="sort" value="{{ sort }}">
     <input type="hidden" name="q" value="{{ q or '' }}">
     <input type="hidden" name="date" value="{{ date_filter or '' }}">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
+    <input type="hidden" name="page" value="{{ page }}">
 
     <div class="qso-tools">
-      <button class="btn" type="submit">Build Combined Clip</button>
-      <span class="muted">Selected clips will be combined in timestamp order.</span>
+      <button class="btn" type="submit" name="scope" value="selected">Build Combined Clip</button>
+      <button class="btn" type="submit" name="scope" value="all_day">Build All Audio For This Day</button>
+      <span class="muted">Combined clips always follow timestamp order and ignore non-audio files.</span>
     </div>
+
+    {% if total_pages > 1 %}
+      <div class="pager">
+        {% if page > 1 %}
+          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+        {% endif %}
+        <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
+        {% if page < total_pages %}
+          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+        {% endif %}
+      </div>
+    {% endif %}
 
     <table>
       <thead>
@@ -143,6 +176,18 @@ TEMPLATE = r"""
         {% endfor %}
       </tbody>
     </table>
+
+    {% if total_pages > 1 %}
+      <div class="pager">
+        {% if page > 1 %}
+          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+        {% endif %}
+        <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
+        {% if page < total_pages %}
+          <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+        {% endif %}
+      </div>
+    {% endif %}
 
   </form>
 
@@ -277,6 +322,21 @@ def parse_date_filter(date_raw: str, *, date_param_present: bool):
     return date_filter
 
 
+def parse_page_number(page_raw: str | None) -> int:
+    try:
+        page = int(page_raw or "1")
+    except ValueError:
+        page = 1
+    return max(page, 1)
+
+
+def parse_per_page(per_page_raw: str | None) -> str:
+    per_page = (per_page_raw or DEFAULT_PER_PAGE).lower()
+    if per_page not in PER_PAGE_OPTIONS:
+        return DEFAULT_PER_PAGE
+    return per_page
+
+
 def stream_ffmpeg_mp3(cmd: list[str], *, download_name: str | None = None) -> Response:
     try:
         proc = subprocess.Popen(
@@ -352,22 +412,7 @@ def stream_combined_mp3(paths: list[Path], *, download_name: str | None = None) 
     return stream_ffmpeg_mp3(cmd, download_name=download_name)
 
 
-def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, error_message: str | None = None):
-    rel = Path(subpath)
-    base = within_root(ARCHIVE_ROOT / rel)
-    if not base.exists() or not base.is_dir():
-        abort(404)
-
-    sort = sort or request.args.get("sort", "time")
-    q = q if q is not None else (request.args.get("q") or "").strip().lower()
-
-    if date_param_present is None:
-        date_param_present = "date" in request.args
-    if date_raw is None:
-        date_raw = (request.args.get("date") or "").strip() if date_param_present else ""
-    date_filter = parse_date_filter(date_raw, date_param_present=date_param_present)
-    date_filter_str = date_filter.isoformat() if date_filter else None
-
+def collect_entries(base: Path, rel: Path, *, sort: str, q: str, date_filter):
     entries = []
     try:
         with os.scandir(base) as it:
@@ -402,6 +447,7 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
                         "time_iso": t_iso,
                         "is_audio": is_audio,
                         "mimetype": mimetype,
+                        "mtime": stat.st_mtime,
                         "sort_key": (
                             0 if is_dir else 1,
                             -stat.st_mtime if sort == "time" else de.name.lower(),
@@ -412,6 +458,41 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
         abort(403)
 
     entries.sort(key=lambda x: x["sort_key"])
+    return entries
+
+
+def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, per_page_raw: str | None = None, page_raw: str | None = None, error_message: str | None = None):
+    rel = Path(subpath)
+    base = within_root(ARCHIVE_ROOT / rel)
+    if not base.exists() or not base.is_dir():
+        abort(404)
+
+    sort = sort or request.args.get("sort", "time")
+    q = q if q is not None else (request.args.get("q") or "").strip().lower()
+
+    if date_param_present is None:
+        date_param_present = "date" in request.args
+    if date_raw is None:
+        date_raw = (request.args.get("date") or "").strip() if date_param_present else ""
+    date_filter = parse_date_filter(date_raw, date_param_present=date_param_present)
+    date_filter_str = date_filter.isoformat() if date_filter else None
+    per_page = parse_per_page(per_page_raw if per_page_raw is not None else request.args.get("per_page"))
+    page = parse_page_number(page_raw if page_raw is not None else request.args.get("page"))
+    entries = collect_entries(base, rel, sort=sort, q=q, date_filter=date_filter)
+    total_items = len(entries)
+
+    if per_page == "all":
+        paged_entries = entries
+        total_pages = 1 if total_items else 1
+        page = 1
+    else:
+        per_page_num = int(per_page)
+        total_pages = max((total_items + per_page_num - 1) // per_page_num, 1)
+        page = min(page, total_pages)
+        start = (page - 1) * per_page_num
+        end = start + per_page_num
+        paged_entries = entries[start:end]
+
     breadcrumbs = build_breadcrumbs(rel.as_posix())
     parent_link = None
     if rel.as_posix() not in ("", "."):
@@ -419,13 +500,18 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
 
     return render_template_string(
         TEMPLATE,
-        items=entries,
+        items=paged_entries,
         rel=rel.as_posix(),
         breadcrumbs=breadcrumbs,
         parent_link=parent_link,
         sort=sort,
         q=q,
         date_filter=date_filter_str,
+        per_page=per_page,
+        per_page_options=PER_PAGE_OPTIONS,
+        page=page,
+        total_pages=total_pages,
+        total_items=total_items,
         error_message=error_message,
     )
 
@@ -440,11 +526,20 @@ def browse(subpath: str):
 @app.post("/qso")
 def qso_builder():
     selected = request.form.getlist("files")
+    scope = request.form.get("scope", "selected")
     subpath = request.form.get("subpath", "")
     sort = request.form.get("sort", "time")
     q = (request.form.get("q") or "").strip().lower()
     date_raw = (request.form.get("date") or "").strip()
     date_param_present = "date" in request.form
+    per_page = parse_per_page(request.form.get("per_page"))
+    page = parse_page_number(request.form.get("page"))
+
+    if scope == "all_day":
+        rel = Path(subpath)
+        base = within_root(ARCHIVE_ROOT / rel)
+        date_filter = parse_date_filter(date_raw, date_param_present=date_param_present)
+        selected = [entry["rel"] for entry in collect_entries(base, rel, sort=sort, q=q, date_filter=date_filter) if entry["is_audio"]]
 
     if not selected:
         return render_browse_page(
@@ -453,6 +548,8 @@ def qso_builder():
             q=q,
             date_raw=date_raw,
             date_param_present=date_param_present,
+            per_page_raw=per_page,
+            page_raw=str(page),
             error_message="Select at least one audio clip to build a QSO.",
         )
 
