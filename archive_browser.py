@@ -17,12 +17,12 @@ from flask import (
 )
 
 # ====== CONFIG ======
-# Set this to your archive folder
-ARCHIVE_ROOT = Path("/var/spool/asterisk/monitor/67146").resolve()
+# Runtime overrides via environment keep local/dev/test installs from rewriting code.
+ARCHIVE_ROOT = Path(os.environ.get("ARCHIVE_ROOT", "/var/spool/asterisk/monitor/67146")).resolve()
 
 # Bind + port
-BIND_HOST = "0.0.0.0"
-BIND_PORT = 5000
+BIND_HOST = os.environ.get("BIND_HOST", "0.0.0.0")
+BIND_PORT = int(os.environ.get("BIND_PORT", "5000"))
 
 # Allowlist of audio extensions we'll show a player for (still OK to download others)
 AUDIO_EXTS = {".wav", ".WAV", ".mp3", ".MP3", ".gsm", ".ulaw", ".alaw"}

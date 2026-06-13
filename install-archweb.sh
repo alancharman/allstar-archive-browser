@@ -126,31 +126,6 @@ create_venv_and_deps() {
   "
 }
 
-patch_archive_root_in_code() {
-  local node="$1"
-  local target="/var/spool/asterisk/monitor/${node}"
-  local file="$INSTALL_DIR/archive_browser.py"
-
-  [[ -f "$file" ]] || die "$file not found. Ensure the repo contains archive_browser.py"
-
-  log "Configuring ARCHIVE_ROOT to $target in archive_browser.py"
-  # Replace existing ARCHIVE_ROOT assignment if found; otherwise inject after pathlib import.
-  if grep -qE '^\s*ARCHIVE_ROOT\s*=\s*Path\(' "$file"; then
-    sed -ri "s|^\s*ARCHIVE_ROOT\s*=\s*Path\(.+\)\.resolve\(\)|ARCHIVE_ROOT = Path(\"$target\").resolve()|g" "$file"
-  else
-    awk -v ar="$target" '
-      BEGIN{done=0}
-      {print}
-      /from[[:space:]]+pathlib[[:space:]]+import[[:space:]]+Path/ && done==0 {
-        print "\n# Injected by installer"
-        print "ARCHIVE_ROOT = Path(\"" ar "\").resolve()"
-        done=1
-      }
-    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-  fi
-  chown "$APP_USER:$APP_GROUP" "$file"
-}
-
 ensure_archive_permissions() {
   local archive_root="$1"
   log "Ensuring '$APP_USER' can read $archive_root ..."
@@ -194,6 +169,9 @@ User=${APP_USER}
 Group=${APP_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=PATH=${INSTALL_DIR}/.venv/bin:/usr/bin
+Environment=ARCHIVE_ROOT=${ARCHIVE_ROOT}
+Environment=BIND_HOST=0.0.0.0
+Environment=BIND_PORT=5000
 ExecStart=${INSTALL_DIR}/.venv/bin/python3 ${INSTALL_DIR}/archive_browser.py
 Restart=on-failure
 RestartSec=3
@@ -227,7 +205,6 @@ main() {
   ensure_dir
   clone_or_update_repo
   create_venv_and_deps
-  patch_archive_root_in_code "$NODE_NUMBER"
   ensure_archive_permissions "$ARCHIVE_ROOT"
   write_systemd_unit
   enable_service
