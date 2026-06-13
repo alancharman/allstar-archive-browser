@@ -57,6 +57,7 @@ TEMPLATE = r"""
     .btn:hover { background:#f3f4f6; }
     .sel { width: 3.5rem; text-align:center; }
     .qso-tools { margin-top: 1rem; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; }
+    .error { margin-top: 1rem; padding: .75rem 1rem; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; border-radius: .5rem; }
   </style>
 </head>
 <body>
@@ -89,6 +90,10 @@ TEMPLATE = r"""
   {% endif %}
 
   <form method="post" action="{{ url_for('qso_builder') }}">
+    <input type="hidden" name="subpath" value="{{ rel if rel != '.' else '' }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="q" value="{{ q or '' }}">
+    <input type="hidden" name="date" value="{{ date_filter or '' }}">
     <table>
       <thead>
         <tr>
@@ -138,6 +143,10 @@ TEMPLATE = r"""
       <span class="muted">Select visible audio clips in playback order, then build one combined stream.</span>
     </div>
   </form>
+
+  {% if error_message %}
+    <div class="error">{{ error_message }}</div>
+  {% endif %}
 
   {% if not items %}
     <p class="muted">No files here.</p>
@@ -249,6 +258,18 @@ def resolve_selected_audio(subpaths: list[str]) -> list[Path]:
     return files
 
 
+def parse_date_filter(date_raw: str, *, date_param_present: bool):
+    date_filter = None
+    if date_raw:
+        try:
+            date_filter = datetime.strptime(date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            date_filter = None
+    elif not date_param_present:
+        date_filter = datetime.now().astimezone().date()
+    return date_filter
+
+
 def concat_manifest(paths: list[Path]) -> bytes:
     lines = []
     for path in paths:
@@ -341,27 +362,20 @@ def stream_combined_mp3(paths: list[Path], *, download_name: str | None = None) 
     return stream_ffmpeg_mp3(cmd, stdin_bytes=concat_manifest(paths), download_name=download_name)
 
 
-@app.route("/", defaults={"subpath": ""})
-@app.route("/browse/", defaults={"subpath": ""})
-@app.route("/browse/<path:subpath>")
-def browse(subpath: str):
+def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, error_message: str | None = None):
     rel = Path(subpath)
     base = within_root(ARCHIVE_ROOT / rel)
     if not base.exists() or not base.is_dir():
         abort(404)
 
-    sort = request.args.get("sort", "time")
-    q = (request.args.get("q") or "").strip().lower()
-    date_param_present = "date" in request.args
-    date_raw = (request.args.get("date") or "").strip() if date_param_present else ""
-    date_filter = None
-    if date_raw:
-        try:
-            date_filter = datetime.strptime(date_raw, "%Y-%m-%d").date()
-        except ValueError:
-            date_filter = None
-    elif not date_param_present:
-        date_filter = datetime.now().astimezone().date()
+    sort = sort or request.args.get("sort", "time")
+    q = q if q is not None else (request.args.get("q") or "").strip().lower()
+
+    if date_param_present is None:
+        date_param_present = "date" in request.args
+    if date_raw is None:
+        date_raw = (request.args.get("date") or "").strip() if date_param_present else ""
+    date_filter = parse_date_filter(date_raw, date_param_present=date_param_present)
     date_filter_str = date_filter.isoformat() if date_filter else None
 
     entries = []
@@ -422,12 +436,36 @@ def browse(subpath: str):
         sort=sort,
         q=q,
         date_filter=date_filter_str,
+        error_message=error_message,
     )
+
+
+@app.route("/", defaults={"subpath": ""})
+@app.route("/browse/", defaults={"subpath": ""})
+@app.route("/browse/<path:subpath>")
+def browse(subpath: str):
+    return render_browse_page(subpath)
 
 
 @app.post("/qso")
 def qso_builder():
     selected = request.form.getlist("files")
+    subpath = request.form.get("subpath", "")
+    sort = request.form.get("sort", "time")
+    q = (request.form.get("q") or "").strip().lower()
+    date_raw = (request.form.get("date") or "").strip()
+    date_param_present = "date" in request.form
+
+    if not selected:
+        return render_browse_page(
+            subpath,
+            sort=sort,
+            q=q,
+            date_raw=date_raw,
+            date_param_present=date_param_present,
+            error_message="Select at least one audio clip to build a QSO.",
+        )
+
     paths = resolve_selected_audio(selected)
     rel_paths = [str(path.relative_to(ARCHIVE_ROOT).as_posix()) for path in paths]
     first_parent = paths[0].parent
