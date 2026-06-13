@@ -21,3 +21,4 @@ __pycache__/
 *.save
 backup/
 backups/
+sample-archive/
