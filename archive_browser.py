@@ -28,6 +28,7 @@ BIND_PORT = int(os.environ.get("BIND_PORT", "5000"))
 AUDIO_EXTS = {".wav", ".WAV", ".mp3", ".MP3", ".gsm", ".ulaw", ".alaw"}
 PER_PAGE_OPTIONS = ("10", "20", "30", "all")
 DEFAULT_PER_PAGE = "20"
+DURATION_CACHE: dict[str, tuple[float, int, float | None]] = {}
 
 # ====== APP ======
 app = Flask(__name__)
@@ -128,6 +129,21 @@ TEMPLATE = r"""
       border-radius: 24px;
       box-shadow: var(--shadow);
       padding: 1rem;
+    }
+    .sticky-area {
+      position: sticky;
+      top: .75rem;
+      z-index: 30;
+      margin: -.15rem -.15rem 1rem;
+      padding: .15rem;
+    }
+    .sticky-card {
+      background: rgba(243, 247, 253, 0.92);
+      backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 20px;
+      padding: .8rem .9rem;
+      box-shadow: 0 14px 36px rgba(18, 40, 82, 0.12);
     }
     .controls {
       display: flex;
@@ -320,6 +336,21 @@ TEMPLATE = r"""
       background: linear-gradient(180deg, #fbfcff 0%, #f3f7fe 100%);
       border: 1px solid var(--line-soft);
     }
+    .summary-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      flex-wrap: wrap;
+      margin-left: auto;
+      padding: .45rem .75rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid var(--line-soft);
+      color: var(--muted);
+      font-size: .88rem;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+    .summary-bar strong { color: var(--text); }
     @media (max-width: 780px) {
       .shell { width: min(100% - 1rem, 100%); margin: .5rem auto 1rem; }
       .hero { padding: 1.1rem 1rem; border-radius: 20px; }
@@ -330,6 +361,8 @@ TEMPLATE = r"""
       .controls form { width: 100%; }
       .status { width: 100%; }
       .qso-tools .btn { width: auto; }
+      .sticky-area { top: .35rem; }
+      .summary-bar { margin-left: 0; width: 100%; justify-content: space-between; }
     }
   </style>
 </head>
@@ -346,56 +379,64 @@ TEMPLATE = r"""
     </section>
 
     <section class="content">
-      <div class="controls">
-        <form method="get">
-          <input type="hidden" name="sort" value="{{ sort }}">
-          {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
-          <input type="hidden" name="per_page" value="{{ per_page }}">
-          <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
-        </form>
-        <form method="get">
-          <input type="hidden" name="sort" value="{{ sort }}">
-          {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
-          <input type="hidden" name="per_page" value="{{ per_page }}">
-          <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
-        </form>
-        <form method="get">
-          <input type="hidden" name="sort" value="{{ sort }}">
-          {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
-          {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
-          <label class="muted" for="per_page">Per page</label>
-          <select id="per_page" name="per_page" onchange="this.form.submit()">
-            {% for option in per_page_options %}
-              <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option|upper }}</option>
-            {% endfor %}
-          </select>
-        </form>
-        <div class="status">
-          <span>Sorted by <strong>{{ 'newest' if sort=='time' else 'name' }}</strong></span>
-          <a class="pill" href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">Switch Sort</a>
-          {% if date_filter %}<span class="pill">Date {{ date_filter }}</span>{% endif %}
+      <div class="sticky-area">
+        <div class="sticky-card">
+          <div class="controls">
+            <form method="get">
+              <input type="hidden" name="sort" value="{{ sort }}">
+              {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+              <input type="hidden" name="per_page" value="{{ per_page }}">
+              <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
+            </form>
+            <form method="get">
+              <input type="hidden" name="sort" value="{{ sort }}">
+              {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+              <input type="hidden" name="per_page" value="{{ per_page }}">
+              <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
+            </form>
+            <form method="get">
+              <input type="hidden" name="sort" value="{{ sort }}">
+              {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
+              {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
+              <label class="muted" for="per_page">Per page</label>
+              <select id="per_page" name="per_page" onchange="this.form.submit()">
+                {% for option in per_page_options %}
+                  <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option|upper }}</option>
+                {% endfor %}
+              </select>
+            </form>
+            <div class="status">
+              <span>Sorted by <strong>{{ 'newest' if sort=='time' else 'name' }}</strong></span>
+              <a class="pill" href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">Switch Sort</a>
+              {% if date_filter %}<span class="pill">Date {{ date_filter }}</span>{% endif %}
+            </div>
+          </div>
+
+          {% if parent_link %}
+            <p><a class="up-link" href="{{ parent_link }}">Back up one level</a></p>
+          {% endif %}
+
+          <div class="helper-card">
+            <div class="qso-tools">
+              <button class="btn btn-primary" type="submit" form="qso-form" name="scope" value="selected">Build Combined Clip</button>
+              <button class="btn" type="submit" form="qso-form" name="scope" value="all_day">Build All Audio For This Day</button>
+              <span class="muted">Combined clips always follow timestamp order and ignore non-audio files.</span>
+              <span class="summary-bar">
+                <span><strong id="selected-count">0</strong> selected</span>
+                <span>Total <strong id="selected-duration">0:00</strong></span>
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {% if parent_link %}
-        <p><a class="up-link" href="{{ parent_link }}">Back up one level</a></p>
-      {% endif %}
-
-      <form method="post" action="{{ url_for('qso_builder') }}">
+      <form id="qso-form" method="post" action="{{ url_for('qso_builder') }}">
         <input type="hidden" name="subpath" value="{{ rel if rel != '.' else '' }}">
         <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="q" value="{{ q or '' }}">
         <input type="hidden" name="date" value="{{ date_filter or '' }}">
         <input type="hidden" name="per_page" value="{{ per_page }}">
         <input type="hidden" name="page" value="{{ page }}">
-
-        <div class="helper-card">
-          <div class="qso-tools">
-            <button class="btn btn-primary" type="submit" name="scope" value="selected">Build Combined Clip</button>
-            <button class="btn" type="submit" name="scope" value="all_day">Build All Audio For This Day</button>
-            <span class="muted">Combined clips always follow timestamp order and ignore non-audio files.</span>
-          </div>
-        </div>
 
         {% if total_pages > 1 %}
           <div class="pager">
@@ -413,8 +454,9 @@ TEMPLATE = r"""
           <table>
             <thead>
               <tr>
-                <th class="sel">QSO</th>
+                <th class="sel"><input id="toggle-all" type="checkbox" title="Select or deselect all audio clips on this page"></th>
                 <th>Name</th>
+                <th>Duration</th>
                 <th>Size</th>
                 <th>Modified</th>
               </tr>
@@ -424,7 +466,7 @@ TEMPLATE = r"""
                 <tr>
                   <td class="sel">
                     {% if item.is_audio %}
-                      <input type="checkbox" name="files" value="{{ item.rel }}">
+                      <input class="qso-checkbox" type="checkbox" name="files" value="{{ item.rel }}" data-duration="{{ item.duration_seconds if item.duration_seconds is not none else '' }}">
                     {% endif %}
                   </td>
                   <td class="wrap">
@@ -447,6 +489,7 @@ TEMPLATE = r"""
                       {% endif %}
                     {% endif %}
                   </td>
+                  <td class="muted">{{ item.duration_human if item.is_audio else '-' }}</td>
                   <td>{{ item.size_human if not item.is_dir else '-' }}</td>
                   <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
                 </tr>
@@ -477,6 +520,77 @@ TEMPLATE = r"""
       {% endif %}
     </section>
   </div>
+  <script>
+    (function () {
+      const checkboxes = Array.from(document.querySelectorAll('.qso-checkbox'));
+      const countEl = document.getElementById('selected-count');
+      const durationEl = document.getElementById('selected-duration');
+      const toggleAll = document.getElementById('toggle-all');
+      let lastIndex = null;
+
+      function formatDuration(totalSeconds) {
+        const rounded = Math.max(0, Math.round(totalSeconds));
+        const hours = Math.floor(rounded / 3600);
+        const minutes = Math.floor((rounded % 3600) / 60);
+        const seconds = rounded % 60;
+        if (hours > 0) {
+          return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+        return `${minutes}:${String(seconds).padStart(2, '0')}`;
+      }
+
+      function updateSummary() {
+        let selectedCount = 0;
+        let totalDuration = 0;
+        for (const checkbox of checkboxes) {
+          if (!checkbox.checked) {
+            continue;
+          }
+          selectedCount += 1;
+          const duration = parseFloat(checkbox.dataset.duration || '');
+          if (!Number.isNaN(duration)) {
+            totalDuration += duration;
+          }
+        }
+        if (countEl) {
+          countEl.textContent = String(selectedCount);
+        }
+        if (durationEl) {
+          durationEl.textContent = formatDuration(totalDuration);
+        }
+        if (toggleAll) {
+          toggleAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+          toggleAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+        }
+      }
+
+      checkboxes.forEach((checkbox, index) => {
+        checkbox.addEventListener('click', function (event) {
+          if (event.shiftKey && lastIndex !== null) {
+            const start = Math.min(lastIndex, index);
+            const end = Math.max(lastIndex, index);
+            const targetState = checkbox.checked;
+            for (let i = start; i <= end; i += 1) {
+              checkboxes[i].checked = targetState;
+            }
+          }
+          lastIndex = index;
+          updateSummary();
+        });
+      });
+
+      if (toggleAll) {
+        toggleAll.addEventListener('change', function () {
+          for (const checkbox of checkboxes) {
+            checkbox.checked = toggleAll.checked;
+          }
+          updateSummary();
+        });
+      }
+
+      updateSummary();
+    }());
+  </script>
 </body>
 </html>
 """
@@ -581,6 +695,7 @@ QSO_TEMPLATE = r"""
     <section class="panel">
       <h1>QSO Builder <span class="pill">{{ count }} clips</span></h1>
       <p class="muted">The combined clip follows timestamp order from the selected archive view.</p>
+      <p class="muted">Combined duration <span class="pill">{{ total_duration_human }}</span></p>
 
       <div class="actions">
         <a class="btn" href="{{ stream_url }}">Play Combined Stream</a>
@@ -596,7 +711,7 @@ QSO_TEMPLATE = r"""
         <h2>Included Clips</h2>
         <ol>
           {% for item in items %}
-            <li>{{ item }}</li>
+            <li>{{ item.name }} <span class="muted">({{ item.duration_human }})</span></li>
           {% endfor %}
         </ol>
       </div>
@@ -696,6 +811,52 @@ def parse_per_page(per_page_raw: str | None) -> str:
     if per_page not in PER_PAGE_OPTIONS:
         return DEFAULT_PER_PAGE
     return per_page
+
+
+def fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    rounded = max(0, int(round(seconds)))
+    hours, rem = divmod(rounded, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def get_audio_duration(path: Path) -> float | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+
+    cache_key = str(path)
+    cached = DURATION_CACHE.get(cache_key)
+    if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+        return cached[2]
+
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        duration = None
+    else:
+        try:
+            duration = float((result.stdout or "").strip()) if result.returncode == 0 else None
+        except ValueError:
+            duration = None
+
+    DURATION_CACHE[cache_key] = (stat.st_mtime, stat.st_size, duration)
+    return duration
 
 
 def stream_ffmpeg_mp3(cmd: list[str], *, download_name: str | None = None) -> Response:
@@ -854,6 +1015,15 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
         end = start + per_page_num
         paged_entries = entries[start:end]
 
+    for item in paged_entries:
+        item["duration_seconds"] = None
+        item["duration_human"] = "-"
+        if item["is_audio"]:
+            full = within_root(ARCHIVE_ROOT / Path(item["rel"]))
+            duration = get_audio_duration(full)
+            item["duration_seconds"] = duration
+            item["duration_human"] = fmt_duration(duration)
+
     breadcrumbs = build_breadcrumbs(rel.as_posix())
     parent_link = None
     if rel.as_posix() not in ("", "."):
@@ -917,6 +1087,15 @@ def qso_builder():
     paths = resolve_selected_audio(selected)
     rel_paths = [str(path.relative_to(ARCHIVE_ROOT).as_posix()) for path in paths]
     first_parent = paths[0].parent
+    item_details = []
+    total_duration_seconds = 0.0
+    has_duration = False
+    for path in paths:
+        duration = get_audio_duration(path)
+        if duration is not None:
+            total_duration_seconds += duration
+            has_duration = True
+        item_details.append({"name": path.name, "duration_human": fmt_duration(duration)})
     try:
         back_rel = first_parent.relative_to(ARCHIVE_ROOT).as_posix()
     except ValueError:
@@ -925,7 +1104,8 @@ def qso_builder():
     return render_template_string(
         QSO_TEMPLATE,
         count=len(paths),
-        items=[path.name for path in paths],
+        items=item_details,
+        total_duration_human=fmt_duration(total_duration_seconds if has_duration else None),
         stream_url=url_for("qso_stream", files=rel_paths),
         download_url=url_for("qso_download", files=rel_paths),
         back_url=url_for("browse", subpath=back_rel),
