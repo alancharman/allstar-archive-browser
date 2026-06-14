@@ -14,6 +14,7 @@ SERVICE_NAME="archweb-qso"
 APP_USER="recordings"
 APP_GROUP="${APP_USER}"
 APP_PORT="5001"
+CACHE_DIR="${INSTALL_DIR}/cache"
 
 ########################
 # Helpers
@@ -70,6 +71,7 @@ ensure_user() {
 
 ensure_dir() {
   mkdir -p "$INSTALL_DIR"
+  mkdir -p "$CACHE_DIR"
   chown -R "$APP_USER:$APP_GROUP" "$INSTALL_DIR"
 }
 
@@ -177,6 +179,7 @@ Environment=PATH=${INSTALL_DIR}/.venv/bin:/usr/bin
 Environment=ARCHIVE_ROOT=${ARCHIVE_ROOT}
 Environment=BIND_HOST=0.0.0.0
 Environment=BIND_PORT=${APP_PORT}
+Environment=ARCHIVE_CACHE_DB=${CACHE_DIR}/archive_browser_cache.sqlite3
 ExecStart=${INSTALL_DIR}/.venv/bin/python3 ${INSTALL_DIR}/archive_browser.py
 Restart=on-failure
 RestartSec=3

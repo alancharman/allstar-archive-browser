@@ -29,7 +29,12 @@ BIND_PORT = int(os.environ.get("BIND_PORT", "5000"))
 AUDIO_EXTS = {".wav", ".WAV", ".mp3", ".MP3", ".gsm", ".ulaw", ".alaw"}
 PER_PAGE_OPTIONS = ("10", "20", "30", "all")
 DEFAULT_PER_PAGE = "20"
-CACHE_DB_PATH = Path(os.environ.get("ARCHIVE_CACHE_DB", str((ARCHIVE_ROOT / ".archive_browser_cache.sqlite3"))))
+CACHE_DB_PATH = Path(
+    os.environ.get(
+        "ARCHIVE_CACHE_DB",
+        str(Path.cwd() / "cache" / "archive_browser_cache.sqlite3"),
+    )
+)
 
 # ====== APP ======
 app = Flask(__name__)
