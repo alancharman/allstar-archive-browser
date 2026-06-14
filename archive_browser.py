@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import mimetypes
 import os
+import sqlite3
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +29,7 @@ BIND_PORT = int(os.environ.get("BIND_PORT", "5000"))
 AUDIO_EXTS = {".wav", ".WAV", ".mp3", ".MP3", ".gsm", ".ulaw", ".alaw"}
 PER_PAGE_OPTIONS = ("10", "20", "30", "all")
 DEFAULT_PER_PAGE = "20"
-DURATION_CACHE: dict[str, tuple[float, int, float | None]] = {}
+CACHE_DB_PATH = Path(os.environ.get("ARCHIVE_CACHE_DB", str((ARCHIVE_ROOT / ".archive_browser_cache.sqlite3"))))
 
 # ====== APP ======
 app = Flask(__name__)
@@ -813,6 +814,66 @@ def parse_per_page(per_page_raw: str | None) -> str:
     return per_page
 
 
+def get_cache_connection() -> sqlite3.Connection:
+    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(CACHE_DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audio_duration_cache (
+            rel_path TEXT PRIMARY KEY,
+            mtime REAL NOT NULL,
+            size INTEGER NOT NULL,
+            duration REAL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audio_duration_cache_updated_at ON audio_duration_cache(updated_at)"
+    )
+    return conn
+
+
+def get_cached_duration(rel_path: str, *, mtime: float, size: int) -> float | None | object:
+    conn = get_cache_connection()
+    try:
+        row = conn.execute(
+            "SELECT mtime, size, duration FROM audio_duration_cache WHERE rel_path = ?",
+            (rel_path,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return _CACHE_MISS
+    cached_mtime, cached_size, duration = row
+    if cached_mtime != mtime or cached_size != size:
+        return _CACHE_MISS
+    return duration
+
+
+def store_cached_duration(rel_path: str, *, mtime: float, size: int, duration: float | None) -> None:
+    conn = get_cache_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO audio_duration_cache(rel_path, mtime, size, duration, updated_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(rel_path) DO UPDATE SET
+                mtime=excluded.mtime,
+                size=excluded.size,
+                duration=excluded.duration,
+                updated_at=excluded.updated_at
+            """,
+            (rel_path, mtime, size, duration, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_CACHE_MISS = object()
+
+
 def fmt_duration(seconds: float | None) -> str:
     if seconds is None:
         return "-"
@@ -824,16 +885,21 @@ def fmt_duration(seconds: float | None) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def get_audio_duration(path: Path) -> float | None:
+def get_audio_duration(path: Path, *, rel_path: str | None = None, stat_result: os.stat_result | None = None) -> float | None:
     try:
-        stat = path.stat()
+        stat = stat_result or path.stat()
     except FileNotFoundError:
         return None
 
-    cache_key = str(path)
-    cached = DURATION_CACHE.get(cache_key)
-    if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
-        return cached[2]
+    if rel_path is None:
+        try:
+            rel_path = path.relative_to(ARCHIVE_ROOT).as_posix()
+        except ValueError:
+            rel_path = str(path)
+
+    cached = get_cached_duration(rel_path, mtime=stat.st_mtime, size=stat.st_size)
+    if cached is not _CACHE_MISS:
+        return cached
 
     cmd = [
         "ffprobe",
@@ -855,7 +921,7 @@ def get_audio_duration(path: Path) -> float | None:
         except ValueError:
             duration = None
 
-    DURATION_CACHE[cache_key] = (stat.st_mtime, stat.st_size, duration)
+    store_cached_duration(rel_path, mtime=stat.st_mtime, size=stat.st_size, duration=duration)
     return duration
 
 
@@ -1020,7 +1086,7 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
         item["duration_human"] = "-"
         if item["is_audio"]:
             full = within_root(ARCHIVE_ROOT / Path(item["rel"]))
-            duration = get_audio_duration(full)
+            duration = get_audio_duration(full, rel_path=item["rel"], stat_result=full.stat())
             item["duration_seconds"] = duration
             item["duration_human"] = fmt_duration(duration)
 
@@ -1091,7 +1157,7 @@ def qso_builder():
     total_duration_seconds = 0.0
     has_duration = False
     for path in paths:
-        duration = get_audio_duration(path)
+        duration = get_audio_duration(path, rel_path=path.relative_to(ARCHIVE_ROOT).as_posix())
         if duration is not None:
             total_duration_seconds += duration
             has_duration = True
