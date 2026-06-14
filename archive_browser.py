@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import mimetypes
 import os
+import re
 import sqlite3
 import subprocess
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from flask import (
     Flask,
     Response,
     abort,
+    jsonify,
     render_template_string,
     request,
     send_from_directory,
@@ -357,6 +359,46 @@ TEMPLATE = r"""
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
     }
     .summary-bar strong { color: var(--text); }
+    .load-meter {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      margin-left: auto;
+      min-width: min(320px, 100%);
+    }
+    .load-meter[hidden] { display: none; }
+    .load-track {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 140px;
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(15, 98, 254, 0.12);
+      border: 1px solid rgba(15, 98, 254, 0.12);
+    }
+    .load-fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #0f62fe 0%, #36a2ff 100%);
+      transition: width .22s ease;
+    }
+    .load-meter.is-indeterminate .load-fill {
+      width: 38%;
+      animation: load-sweep 1.15s ease-in-out infinite;
+    }
+    .load-text {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: .84rem;
+      white-space: nowrap;
+    }
+    @keyframes load-sweep {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(290%); }
+    }
     @media (max-width: 780px) {
       .shell { width: min(100% - 1rem, 100%); margin: .5rem auto 1rem; }
       .hero { padding: 1.1rem 1rem; border-radius: 20px; }
@@ -369,6 +411,7 @@ TEMPLATE = r"""
       .qso-tools .btn { width: auto; }
       .sticky-area { top: .35rem; }
       .summary-bar { margin-left: 0; width: 100%; justify-content: space-between; }
+      .load-meter { margin-left: 0; width: 100%; }
     }
   </style>
 </head>
@@ -430,6 +473,10 @@ TEMPLATE = r"""
               <span class="summary-bar">
                 <span><strong id="selected-count">0</strong> selected</span>
                 <span>Total <strong id="selected-duration">0:00</strong></span>
+              </span>
+              <span id="duration-loader" class="load-meter" hidden>
+                <span class="load-track"><span id="duration-loader-fill" class="load-fill"></span></span>
+                <span id="duration-loader-text" class="load-text">Processing clips...</span>
               </span>
             </div>
           </div>
@@ -495,7 +542,13 @@ TEMPLATE = r"""
                       {% endif %}
                     {% endif %}
                   </td>
-                  <td class="muted">{{ item.duration_human if item.is_audio else '-' }}</td>
+                  <td class="muted">
+                    {% if item.is_audio %}
+                      <span class="duration-display" data-rel="{{ item.rel }}">...</span>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
                   <td>{{ item.size_human if not item.is_dir else '-' }}</td>
                   <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
                 </tr>
@@ -532,7 +585,15 @@ TEMPLATE = r"""
       const countEl = document.getElementById('selected-count');
       const durationEl = document.getElementById('selected-duration');
       const toggleAll = document.getElementById('toggle-all');
+      const qsoForm = document.getElementById('qso-form');
+      const durationDisplays = new Map(
+        Array.from(document.querySelectorAll('.duration-display')).map((el) => [el.dataset.rel, el])
+      );
+      const loader = document.getElementById('duration-loader');
+      const loaderFill = document.getElementById('duration-loader-fill');
+      const loaderText = document.getElementById('duration-loader-text');
       let lastIndex = null;
+      let buildPending = false;
 
       function formatDuration(totalSeconds) {
         const rounded = Math.max(0, Math.round(totalSeconds));
@@ -543,6 +604,43 @@ TEMPLATE = r"""
           return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
         }
         return `${minutes}:${String(seconds).padStart(2, '0')}`;
+      }
+
+      function setLoaderProgress(done, total) {
+        if (!loader || !loaderFill || !loaderText) {
+          return;
+        }
+        if (buildPending) {
+          return;
+        }
+        if (total <= 0) {
+          loader.hidden = true;
+          return;
+        }
+        loader.hidden = false;
+        loader.classList.remove('is-indeterminate');
+        const pct = Math.max(0, Math.min(100, (done / total) * 100));
+        loaderFill.style.width = `${pct}%`;
+        loaderFill.style.transform = '';
+        loaderText.textContent = done >= total ? 'Processing complete' : `Processing clips ${done}/${total}`;
+        if (done >= total) {
+          setTimeout(() => {
+            if (!buildPending) {
+              loader.hidden = true;
+            }
+          }, 600);
+        }
+      }
+
+      function startBuildState(scope) {
+        if (!loader || !loaderFill || !loaderText) {
+          return;
+        }
+        buildPending = true;
+        loader.hidden = false;
+        loader.classList.add('is-indeterminate');
+        loaderFill.style.width = '38%';
+        loaderText.textContent = scope === 'all_day' ? 'Building day clip list...' : 'Building combined clip...';
       }
 
       function updateSummary() {
@@ -594,7 +692,64 @@ TEMPLATE = r"""
         });
       }
 
+      if (qsoForm) {
+        qsoForm.addEventListener('submit', function (event) {
+          const submitter = event.submitter;
+          const scope = submitter && submitter.name === 'scope' ? submitter.value : 'selected';
+          startBuildState(scope);
+        });
+      }
+
+      async function loadDurations() {
+        const audioRels = checkboxes.map((checkbox) => checkbox.value);
+        const total = audioRels.length;
+        if (total === 0) {
+          setLoaderProgress(0, 0);
+          return;
+        }
+
+        const chunkSize = 5;
+        let completed = 0;
+        setLoaderProgress(0, total);
+
+        for (let start = 0; start < total; start += chunkSize) {
+          const chunk = audioRels.slice(start, start + chunkSize);
+          try {
+            const response = await fetch('{{ url_for("api_durations") }}', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ files: chunk })
+            });
+            if (!response.ok) {
+              throw new Error(`Duration request failed: ${response.status}`);
+            }
+            const payload = await response.json();
+            for (const item of payload.items || []) {
+              const display = durationDisplays.get(item.rel);
+              if (display) {
+                display.textContent = item.duration_human || '-';
+              }
+              const checkbox = checkboxes.find((entry) => entry.value === item.rel);
+              if (checkbox) {
+                checkbox.dataset.duration = item.duration_seconds ?? '';
+              }
+            }
+          } catch (error) {
+            console.error(error);
+            if (loaderText) {
+              loaderText.textContent = 'Processing failed';
+            }
+            return;
+          }
+
+          completed += chunk.length;
+          setLoaderProgress(completed, total);
+          updateSummary();
+        }
+      }
+
       updateSummary();
+      loadDurations();
     }());
   </script>
 </body>
@@ -890,6 +1045,47 @@ def fmt_duration(seconds: float | None) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+_FFMPEG_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def probe_audio_duration(path: Path) -> float | None:
+    ffprobe_cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, check=False, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        result = None
+    else:
+        try:
+            if result.returncode == 0:
+                return float((result.stdout or "").strip())
+        except ValueError:
+            pass
+
+    # Some local Windows installs expose ffmpeg without ffprobe.
+    ffmpeg_cmd = ["ffmpeg", "-i", str(path), "-f", "null", "-"]
+    try:
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=False, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    match = _FFMPEG_DURATION_RE.search(result.stderr or "")
+    if not match:
+        return None
+    hours = int(match.group(1))
+    minutes = int(match.group(2))
+    seconds = float(match.group(3))
+    return (hours * 3600) + (minutes * 60) + seconds
+
+
 def get_audio_duration(path: Path, *, rel_path: str | None = None, stat_result: os.stat_result | None = None) -> float | None:
     try:
         stat = stat_result or path.stat()
@@ -906,25 +1102,7 @@ def get_audio_duration(path: Path, *, rel_path: str | None = None, stat_result: 
     if cached is not _CACHE_MISS:
         return cached
 
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(path),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        duration = None
-    else:
-        try:
-            duration = float((result.stdout or "").strip()) if result.returncode == 0 else None
-        except ValueError:
-            duration = None
+    duration = probe_audio_duration(path)
 
     store_cached_duration(rel_path, mtime=stat.st_mtime, size=stat.st_size, duration=duration)
     return duration
@@ -1086,15 +1264,6 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
         end = start + per_page_num
         paged_entries = entries[start:end]
 
-    for item in paged_entries:
-        item["duration_seconds"] = None
-        item["duration_human"] = "-"
-        if item["is_audio"]:
-            full = within_root(ARCHIVE_ROOT / Path(item["rel"]))
-            duration = get_audio_duration(full, rel_path=item["rel"], stat_result=full.stat())
-            item["duration_seconds"] = duration
-            item["duration_human"] = fmt_duration(duration)
-
     breadcrumbs = build_breadcrumbs(rel.as_posix())
     parent_link = None
     if rel.as_posix() not in ("", "."):
@@ -1123,6 +1292,36 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
 @app.route("/browse/<path:subpath>")
 def browse(subpath: str):
     return render_browse_page(subpath)
+
+
+@app.post("/api/durations")
+def api_durations():
+    data = request.get_json(silent=True) or {}
+    rel_paths = data.get("files") or []
+    if not isinstance(rel_paths, list):
+        abort(400)
+
+    items = []
+    for rel_path in rel_paths:
+        if not isinstance(rel_path, str):
+            abort(400)
+        rel = Path(rel_path)
+        full = within_root(ARCHIVE_ROOT / rel)
+        if not full.exists() or not full.is_file() or not is_audio_path(full):
+            continue
+        try:
+            stat = full.stat()
+        except FileNotFoundError:
+            continue
+        duration = get_audio_duration(full, rel_path=rel.as_posix(), stat_result=stat)
+        items.append(
+            {
+                "rel": rel.as_posix(),
+                "duration_seconds": duration,
+                "duration_human": fmt_duration(duration),
+            }
+        )
+    return jsonify({"items": items})
 
 
 @app.post("/qso")
