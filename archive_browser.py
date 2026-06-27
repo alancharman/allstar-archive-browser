@@ -433,18 +433,21 @@ TEMPLATE = r"""
           <div class="controls">
             <form method="get">
               <input type="hidden" name="sort" value="{{ sort }}">
+              <input type="hidden" name="dir" value="{{ direction }}">
               {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
               <input type="hidden" name="per_page" value="{{ per_page }}">
               <input type="search" name="q" value="{{ q or '' }}" placeholder="Filter by filename..." />
             </form>
             <form method="get">
               <input type="hidden" name="sort" value="{{ sort }}">
+              <input type="hidden" name="dir" value="{{ direction }}">
               {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
               <input type="hidden" name="per_page" value="{{ per_page }}">
               <input type="date" name="date" value="{{ date_filter or '' }}" onchange="this.form.submit()" />
             </form>
             <form method="get">
               <input type="hidden" name="sort" value="{{ sort }}">
+              <input type="hidden" name="dir" value="{{ direction }}">
               {% if q %}<input type="hidden" name="q" value="{{ q|e }}">{% endif %}
               {% if date_filter %}<input type="hidden" name="date" value="{{ date_filter }}">{% endif %}
               <label class="muted" for="per_page">Per page</label>
@@ -455,8 +458,10 @@ TEMPLATE = r"""
               </select>
             </form>
             <div class="status">
-              <span>Sorted by <strong>{{ 'newest' if sort=='time' else 'name' }}</strong></span>
-              <a class="pill" href="?sort={{ 'name' if sort=='time' else 'time' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">Switch Sort</a>
+              <span>Sorted by <strong>{{ 'oldest' if direction == 'asc' else 'newest' }}</strong></span>
+              <a class="pill" href="?dir={{ 'asc' if direction == 'desc' else 'desc' }}{% if q %}&q={{ q|e }}{% endif %}{% if date_filter %}&date={{ date_filter }}{% endif %}&per_page={{ per_page }}{% if page > 1 %}&page={{ page }}{% endif %}">
+                {{ 'Oldest First' if direction == 'desc' else 'Newest First' }}
+              </a>
               {% if date_filter %}<span class="pill">Date {{ date_filter }}</span>{% endif %}
             </div>
           </div>
@@ -486,6 +491,7 @@ TEMPLATE = r"""
       <form id="qso-form" method="post" action="{{ url_for('qso_builder') }}">
         <input type="hidden" name="subpath" value="{{ rel if rel != '.' else '' }}">
         <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="dir" value="{{ direction }}">
         <input type="hidden" name="q" value="{{ q or '' }}">
         <input type="hidden" name="date" value="{{ date_filter or '' }}">
         <input type="hidden" name="per_page" value="{{ per_page }}">
@@ -494,11 +500,11 @@ TEMPLATE = r"""
         {% if total_pages > 1 %}
           <div class="pager">
             {% if page > 1 %}
-              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, dir=direction, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
             {% endif %}
             <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
             {% if page < total_pages %}
-              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, dir=direction, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
             {% endif %}
           </div>
         {% endif %}
@@ -560,11 +566,11 @@ TEMPLATE = r"""
         {% if total_pages > 1 %}
           <div class="pager">
             {% if page > 1 %}
-              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, dir=direction, q=q or None, date=date_filter, per_page=per_page, page=page-1) }}">Previous</a>
             {% endif %}
             <span class="muted">Page {{ page }} of {{ total_pages }}{% if total_items %} ({{ total_items }} items){% endif %}</span>
             {% if page < total_pages %}
-              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
+              <a class="btn" href="{{ url_for('browse', subpath=rel if rel != '.' else '', sort=sort, dir=direction, q=q or None, date=date_filter, per_page=per_page, page=page+1) }}">Next</a>
             {% endif %}
           </div>
         {% endif %}
@@ -974,6 +980,12 @@ def parse_per_page(per_page_raw: str | None) -> str:
     return per_page
 
 
+def normalize_sort_direction(direction: str | None) -> str:
+    if direction in {"asc", "desc"}:
+        return direction
+    return "desc"
+
+
 def get_cache_connection() -> sqlite3.Connection:
     CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CACHE_DB_PATH)
@@ -1183,7 +1195,7 @@ def stream_combined_mp3(paths: list[Path], *, download_name: str | None = None) 
     return stream_ffmpeg_mp3(cmd, download_name=download_name)
 
 
-def collect_entries(base: Path, rel: Path, *, sort: str, q: str, date_filter):
+def collect_entries(base: Path, rel: Path, *, direction: str, q: str, date_filter):
     entries = []
     try:
         with os.scandir(base) as it:
@@ -1208,6 +1220,8 @@ def collect_entries(base: Path, rel: Path, *, sort: str, q: str, date_filter):
                 mimetype = mimetypes.guess_type(p.name)[0]
                 is_audio = is_audio_path(p)
 
+                sort_value = stat.st_mtime if direction == "asc" else -stat.st_mtime
+
                 entries.append(
                     {
                         "name": de.name,
@@ -1221,7 +1235,7 @@ def collect_entries(base: Path, rel: Path, *, sort: str, q: str, date_filter):
                         "mtime": stat.st_mtime,
                         "sort_key": (
                             0 if is_dir else 1,
-                            -stat.st_mtime if sort == "time" else de.name.lower(),
+                            sort_value,
                         ),
                     }
                 )
@@ -1232,13 +1246,14 @@ def collect_entries(base: Path, rel: Path, *, sort: str, q: str, date_filter):
     return entries
 
 
-def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, per_page_raw: str | None = None, page_raw: str | None = None, error_message: str | None = None):
+def render_browse_page(subpath: str, *, direction: str | None = None, q: str | None = None, date_raw: str | None = None, date_param_present: bool | None = None, per_page_raw: str | None = None, page_raw: str | None = None, error_message: str | None = None):
     rel = Path(subpath)
     base = within_root(ARCHIVE_ROOT / rel)
     if not base.exists() or not base.is_dir():
         abort(404)
 
-    sort = sort or request.args.get("sort", "time")
+    sort = "time"
+    direction = normalize_sort_direction(direction or request.args.get("dir"))
     q = q if q is not None else (request.args.get("q") or "").strip().lower()
 
     if date_param_present is None:
@@ -1249,7 +1264,7 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
     date_filter_str = date_filter.isoformat() if date_filter else None
     per_page = parse_per_page(per_page_raw if per_page_raw is not None else request.args.get("per_page"))
     page = parse_page_number(page_raw if page_raw is not None else request.args.get("page"))
-    entries = collect_entries(base, rel, sort=sort, q=q, date_filter=date_filter)
+    entries = collect_entries(base, rel, direction=direction, q=q, date_filter=date_filter)
     total_items = len(entries)
 
     if per_page == "all":
@@ -1276,6 +1291,7 @@ def render_browse_page(subpath: str, *, sort: str | None = None, q: str | None =
         breadcrumbs=breadcrumbs,
         parent_link=parent_link,
         sort=sort,
+        direction=direction,
         q=q,
         date_filter=date_filter_str,
         per_page=per_page,
@@ -1329,7 +1345,8 @@ def qso_builder():
     selected = request.form.getlist("files")
     scope = request.form.get("scope", "selected")
     subpath = request.form.get("subpath", "")
-    sort = request.form.get("sort", "time")
+    sort = "time"
+    direction = normalize_sort_direction(request.form.get("dir"))
     q = (request.form.get("q") or "").strip().lower()
     date_raw = (request.form.get("date") or "").strip()
     date_param_present = "date" in request.form
@@ -1340,12 +1357,16 @@ def qso_builder():
         rel = Path(subpath)
         base = within_root(ARCHIVE_ROOT / rel)
         date_filter = parse_date_filter(date_raw, date_param_present=date_param_present)
-        selected = [entry["rel"] for entry in collect_entries(base, rel, sort=sort, q=q, date_filter=date_filter) if entry["is_audio"]]
+        selected = [
+            entry["rel"]
+            for entry in collect_entries(base, rel, direction=direction, q=q, date_filter=date_filter)
+            if entry["is_audio"]
+        ]
 
     if not selected:
         return render_browse_page(
             subpath,
-            sort=sort,
+            direction=direction,
             q=q,
             date_raw=date_raw,
             date_param_present=date_param_present,
