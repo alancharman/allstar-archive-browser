@@ -252,6 +252,9 @@ TEMPLATE = r"""
       width: 4.2rem;
       text-align: center;
     }
+    .sel-cell {
+      text-align: center;
+    }
     .table-wrap {
       overflow-x: auto;
       border: 1px solid var(--line-soft);
@@ -281,12 +284,22 @@ TEMPLATE = r"""
     }
     tbody tr:hover { background: rgba(15, 98, 254, 0.045); }
     tbody tr:last-child td { border-bottom: none; }
+    .meta-label {
+      display: none;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: .2rem;
+    }
     .dir, .file-label {
       display: inline-flex;
       align-items: center;
       gap: .55rem;
       font-weight: 700;
       color: var(--text);
+      max-width: 100%;
     }
     .dir::before, .file-label::before {
       display: inline-flex;
@@ -323,7 +336,10 @@ TEMPLATE = r"""
       gap: .55rem;
       margin-top: .55rem;
     }
-    .wrap { word-break: break-word; }
+    .wrap {
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
     .empty {
       padding: 1rem;
       border-radius: var(--radius-sm);
@@ -403,15 +419,105 @@ TEMPLATE = r"""
       .shell { width: min(100% - 1rem, 100%); margin: .5rem auto 1rem; }
       .hero { padding: 1.1rem 1rem; border-radius: 20px; }
       .content { padding: .8rem; border-radius: 20px; }
-      th, td { padding: .75rem .6rem; }
-      .sel { width: 3.2rem; }
       .btn, input[type="search"], input[type="date"], select { width: 100%; }
       .controls form { width: 100%; }
       .status { width: 100%; }
-      .qso-tools .btn { width: auto; }
-      .sticky-area { top: .35rem; }
+      .controls { padding-bottom: .35rem; }
+      .status { gap: .4rem; }
+      .qso-tools .btn { width: 100%; }
+      .sticky-area {
+        position: static;
+        top: auto;
+        margin: 0 0 .85rem;
+        padding: 0;
+      }
+      .sticky-card {
+        padding: .8rem;
+        box-shadow: 0 10px 24px rgba(18, 40, 82, 0.10);
+      }
+      .helper-card { padding: .75rem .8rem; }
+      .qso-tools, .pager { gap: .6rem; margin: .75rem 0; }
+      .qso-tools > .muted {
+        width: 100%;
+        font-size: .84rem;
+      }
       .summary-bar { margin-left: 0; width: 100%; justify-content: space-between; }
-      .load-meter { margin-left: 0; width: 100%; }
+      .load-meter { margin-left: 0; width: 100%; min-width: 0; }
+      .load-text {
+        font-size: .78rem;
+        white-space: normal;
+      }
+      .table-wrap {
+        overflow: visible;
+        border: none;
+        background: transparent;
+      }
+      table, thead, tbody, tr, td {
+        display: block;
+        width: 100%;
+      }
+      thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+      tbody {
+        display: grid;
+        gap: .7rem;
+      }
+      tbody tr {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid var(--line-soft);
+        border-radius: 18px;
+        padding: .7rem .75rem .8rem;
+        box-shadow: 0 10px 22px rgba(18, 40, 82, 0.07);
+      }
+      tbody tr:hover { background: rgba(255, 255, 255, 0.94); }
+      th, td {
+        padding: 0;
+        border: none;
+      }
+      td {
+        margin-top: .55rem;
+      }
+      td:first-child {
+        margin-top: 0;
+      }
+      .sel, .sel-cell {
+        width: auto;
+        text-align: left;
+      }
+      .sel-cell input[type="checkbox"] {
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+      .meta-label {
+        display: block;
+      }
+      .wrap {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .dir, .file-label {
+        align-items: flex-start;
+        line-height: 1.35;
+      }
+      .dir::before, .file-label::before {
+        margin-top: .05rem;
+      }
+      .audio {
+        max-width: 100%;
+        margin-top: .75rem;
+      }
+      .file-actions {
+        flex-direction: column;
+        gap: .45rem;
+      }
+      .file-actions .btn {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -523,12 +629,14 @@ TEMPLATE = r"""
             <tbody>
               {% for item in items %}
                 <tr>
-                  <td class="sel">
+                  <td class="sel sel-cell">
+                    <span class="meta-label">QSO</span>
                     {% if item.is_audio %}
                       <input class="qso-checkbox" type="checkbox" name="files" value="{{ item.rel }}" data-duration="{{ item.duration_seconds if item.duration_seconds is not none else '' }}">
                     {% endif %}
                   </td>
                   <td class="wrap">
+                    <span class="meta-label">Name</span>
                     {% if item.is_dir %}
                       <span class="dir"><a href="{{ url_for('browse', subpath=item.rel) }}">{{ item.name }}</a></span>
                     {% else %}
@@ -549,14 +657,21 @@ TEMPLATE = r"""
                     {% endif %}
                   </td>
                   <td class="muted">
+                    <span class="meta-label">Duration</span>
                     {% if item.is_audio %}
                       <span class="duration-display" data-rel="{{ item.rel }}">...</span>
                     {% else %}
                       -
                     {% endif %}
                   </td>
-                  <td>{{ item.size_human if not item.is_dir else '-' }}</td>
-                  <td class="muted" title="{{ item.time_iso }}">{{ item.time_human }}</td>
+                  <td>
+                    <span class="meta-label">Size</span>
+                    {{ item.size_human if not item.is_dir else '-' }}
+                  </td>
+                  <td class="muted" title="{{ item.time_iso }}">
+                    <span class="meta-label">Modified</span>
+                    {{ item.time_human }}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
