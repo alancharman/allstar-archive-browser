@@ -138,15 +138,27 @@ ensure_archive_permissions() {
 
   local grp
   grp="$(stat -c %G "$archive_root" || echo "")"
+  local archive_parent archive_grandparent
+  archive_parent="$(dirname "$archive_root")"
+  archive_grandparent="$(dirname "$archive_parent")"
 
   if [[ "$grp" == "asterisk" ]]; then
-    log "Archive group is 'asterisk' → adding $APP_USER to that group and setting g+rX ..."
+    log "Archive group is 'asterisk' -> adding $APP_USER to that group and checking targeted access ..."
     usermod -aG asterisk "$APP_USER" || true
-    # Ensure traverse perms on parent dirs and read on files
-    chmod -R g+rx "$(dirname "$archive_root")" || true
-    find "$archive_root" -type f -exec chmod g+r {} \; || true
+    chmod g+rx "$archive_grandparent" || true
+    chmod g+rx "$archive_parent" || true
+    chmod g+rx "$archive_root" || true
+
+    if sudo -u "$APP_USER" bash -lc "find '$archive_root' -maxdepth 1 -type f -readable -print -quit >/dev/null"; then
+      log "Existing group permissions look sufficient; skipping recursive repair."
+    else
+      log "Access check failed -> repairing permissions only inside $archive_root ..."
+      find "$archive_root" -type d -exec chmod g+rx {} \; || true
+      find "$archive_root" -type f -exec chmod g+r {} \; || true
+    fi
   else
-    log "Using ACLs to grant read to $APP_USER ..."
+    log "Using ACLs to grant read to $APP_USER within $archive_root ..."
+    chmod o+rx "$archive_grandparent" "$archive_parent" "$archive_root" 2>/dev/null || true
     setfacl -R -m "u:$APP_USER:rx" "$archive_root" || true
     find "$archive_root" -type f -exec setfacl -m "u:$APP_USER:r" {} \; || true
     setfacl -dR -m "u:$APP_USER:rx" "$archive_root" || true
@@ -154,8 +166,8 @@ ensure_archive_permissions() {
   fi
 
   # Quick sanity
-  sudo -u "$APP_USER" bash -lc "ls -ld '$archive_root' >/dev/null" || \
-    echo "WARNING: $APP_USER still may not be able to traverse $archive_root"
+  sudo -u "$APP_USER" bash -lc "find '$archive_root' -maxdepth 1 \\( -type d -o -type f \\) -print -quit >/dev/null" || \
+    echo "WARNING: $APP_USER still may not be able to traverse/read $archive_root"
 }
 
 write_systemd_unit() {
