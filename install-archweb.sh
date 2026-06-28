@@ -149,7 +149,7 @@ ensure_archive_permissions() {
     chmod g+rx "$archive_parent" || true
     chmod g+rx "$archive_root" || true
 
-    if sudo -u "$APP_USER" bash -lc "find '$archive_root' -maxdepth 1 -type f -readable -print -quit >/dev/null"; then
+    if sudo -u "$APP_USER" bash -lc "cd / && find '$archive_root' -maxdepth 1 -type f -readable -print -quit >/dev/null"; then
       log "Existing group permissions look sufficient; skipping recursive repair."
     else
       log "Access check failed -> repairing permissions only inside $archive_root ..."
@@ -166,7 +166,7 @@ ensure_archive_permissions() {
   fi
 
   # Quick sanity
-  sudo -u "$APP_USER" bash -lc "find '$archive_root' -maxdepth 1 \\( -type d -o -type f \\) -print -quit >/dev/null" || \
+  sudo -u "$APP_USER" bash -lc "cd / && find '$archive_root' -maxdepth 1 \\( -type d -o -type f \\) -print -quit >/dev/null" || \
     echo "WARNING: $APP_USER still may not be able to traverse/read $archive_root"
 }
 
